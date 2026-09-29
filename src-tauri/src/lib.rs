@@ -231,6 +231,16 @@ pub fn run() {
             commands::add_remote,
             commands::remove_remote,
             commands::fetch_remote,
+            commands::history,
+            commands::commit_detail,
+            commands::compare_files,
+            commands::compare_file_diff,
+            commands::revert_commit,
+            commands::cherry_pick,
+            commands::reset_impact,
+            commands::reset_to,
+            commands::file_timeline,
+            commands::blame_file,
         ])
         .setup(|app| {
             let show_item = MenuItem::with_id(app, "show", "Show  (Ctrl+Shift+G)", true, None::<&str>)?;

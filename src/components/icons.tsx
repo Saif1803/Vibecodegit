@@ -214,3 +214,62 @@ export const TrashIcon = (p: P) => (
     <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" />
   </Icon>
 );
+
+export const HistoryIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M2.75 8a5.25 5.25 0 1 0 1.54-3.71" />
+    <path d="M2.5 2.75v2.5H5" />
+    <path d="M8 5.25V8l1.75 1.75" />
+  </Icon>
+);
+
+export const CommitIcon = (p: P) => (
+  <Icon {...p}>
+    <circle cx="8" cy="8" r="2.5" />
+    <path d="M1.5 8h4M10.5 8h4" />
+  </Icon>
+);
+
+export const CopyIcon = (p: P) => (
+  <Icon {...p}>
+    <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+    <path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" />
+  </Icon>
+);
+
+export const CompareIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M2.5 5.5h10M10 3l2.5 2.5L10 8" />
+    <path d="M13.5 10.5h-10M6 8l-2.5 2.5L6 13" />
+  </Icon>
+);
+
+export const ArrowLeftIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M12.5 8h-9M7 4.5 3.5 8 7 11.5" />
+  </Icon>
+);
+
+/** Blame: lines of a file, each attributed to someone. */
+export const BlameIcon = (p: P) => (
+  <Icon {...p}>
+    <circle cx="4" cy="4.5" r="1.5" />
+    <path d="M1.75 9c.4-1.2 1.2-1.75 2.25-1.75S5.85 7.8 6.25 9" />
+    <path d="M8.5 4h5M8.5 7h5M3 11.5h10.5M3 14h7" />
+  </Icon>
+);
+
+export const CherryIcon = (p: P) => (
+  <Icon {...p}>
+    <circle cx="4.75" cy="11" r="2.25" />
+    <circle cx="11" cy="11.75" r="2.25" />
+    <path d="M4.75 8.75C5.5 5.5 7.5 3.5 10.5 2.5M11 9.5c-.25-3-.5-5-.5-7" />
+  </Icon>
+);
+
+export const ResetIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M3 2.5v11" />
+    <path d="M13 8H6M9 5 6 8l3 3" />
+  </Icon>
+);

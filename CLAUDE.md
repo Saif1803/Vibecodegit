@@ -132,7 +132,7 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
   - End-to-end cases use a local bare remote plus a "teammate" clone (`with_remote`).
   - Clones must set `core.autocrlf=false` at clone time, since your global `autocrlf=true` would make every file look modified.
   - Test file names must be valid on Windows (no `*`, `?`, `:`).
-- **Vitest (`npm test`):** UI-side logic only: path compare, MRU, auto-select, Claude-active window.
+- **Vitest (`npm test`):** UI-side logic only: path compare, MRU, auto-select, Claude-active window, graph width.
 - **UI states:** `npm run dev`, then open `http://localhost:1420/preview.html?s=normal|claude|blocked|conflict|pushfail|clean|norepo|unborn|ahead`.
   - This is the real App with the Rust commands mocked by an in-memory fake repo (`src/dev/preview.tsx`). It's dev-only and not part of the build.
   - Emulate 380×500 for compact and 960×640 for the diff pane.
@@ -158,6 +158,7 @@ src/
   components/icons.tsx, Header.tsx, StatusBar.tsx, Banner.tsx, StepProgress.tsx
   components/RepoPicker.tsx, ChangesList.tsx, CommitBox.tsx, DiffView.tsx, ConfirmDialog.tsx, PromptDialog.tsx, Menu.tsx
   components/Tabs.tsx, ListParts.tsx, BranchesPanel.tsx, TagsPanel.tsx, StashesPanel.tsx, StashView.tsx
+  components/HistoryPanel.tsx, CommitGraph.tsx, commitActions.tsx, CommitView.tsx, FileHistoryViews.tsx, FileListDiff.tsx
   state/recentRepos.ts                   # plugin-store MRU
   state/claudeSessions.ts                # auto-select rule, Claude-active window
   state/pickFolder.ts                    # dialog + set_blur_hide pause
@@ -168,7 +169,7 @@ src-tauri/
   src/lib.rs                             # tray, shortcut, show/hide/blur/expand, plugin + command registration
   src/commands.rs                        # the Tauri commands the webview may call
   src/git/mod.rs                         # the git runner (argv only, stdin pathspecs, no console window)
-  src/git/status.rs, ops.rs, diff.rs, sync.rs, commit.rs, repo.rs, branches.rs, stash.rs, tags.rs (+ remotes)
+  src/git/status.rs, ops.rs, diff.rs, sync.rs, commit.rs, repo.rs, branches.rs, stash.rs, tags.rs (+ remotes), history.rs
   src/git/testutil.rs                    # throwaway repos + bare remotes for tests
   src/placement.rs                       # pure placement math (unit-tested)
   src/taskbar.rs                         # Windows taskbar rect via SHAppBarMessage
@@ -190,7 +191,7 @@ src-tauri/
 - TS types in `src/git/types.ts` mirror the serde types; change both together.
 - No new dependencies beyond the stack above without asking.
 
-## Plan (10 phases; stop for review after each. Phases 1–7 are done.)
+## Plan (10 phases; stop for review after each. Phases 1–8 are done.)
 
 ### Phase 1: Scaffold and lockdown
 - `create-tauri-app` (React + TS + Vite), Tailwind v4 wired in, Vitest set up.
@@ -261,10 +262,20 @@ src-tauri/
 - **Done when:** each operation has a live-git test and the tabs render in the preview.
 
 ### Phase 8: History and recovery
-- History tab: `git log --graph`-style lane graph (computed in Rust from `--format=%H %P …`), paged 200 at a time, with incoming/outgoing markers.
-- Commit detail in the expanded pane: message, author, files, and a per-file diff. Compare any two commits (select two), or a commit with the working tree.
-- Commit actions: revert, cherry-pick, reset (soft / mixed / hard, with hard behind a confirm), create a branch or tag here, and copy the hash.
-- File timeline (`log --follow -- <path>`) and blame (`blame --porcelain`) from a file's diff pane.
+- History tab (`git/history.rs`, `HistoryPanel`): tabs are now **Changes · History · Branches · Tags · Stashes**.
+  - `git log --date-order` of HEAD and its upstream, or every branch/remote/tag with "All branches" (remembered in `localStorage`). Paged 200 at a time ("Load 200 more" refetches the longer list).
+  - The lane graph is laid out in Rust (`layout`, pure and unit-tested): each row carries its dot plus `through` / `up` / `down` lane segments, and lanes never shift sideways. `CommitGraph` only draws it, in palette tokens (accent, status colors, `--graph-violet`).
+  - HEAD is a ring, incoming commits (on `@{u}`, not in HEAD) are hollow with a ↓ badge, outgoing ones get ↑. Ref badges: current branch (accent), branches, remotes, tags.
+  - The filter searches loaded commits only and hides the graph while active.
+- Detail panes stack: each can have a `back` pane (back arrow or Esc returns to it).
+  - Commit (`CommitView`): message, author/committer, clickable parents, refs, files vs. the first parent (the empty tree for a root commit), per-file diff.
+  - Compare (`CompareView`): two commits (Ctrl+click a row while a commit is open, older on the left; or "Select for compare" then "Compare with selected"), or a commit with the working tree. Swap sides.
+- Commit actions (`commitActions.tsx`, the row ⋯ menu and the commit pane's menu): compare, copy hash, new branch/tag here, cherry-pick, revert (merges use `-m 1`), reset soft / mixed / hard.
+  - Hard reset is confirmed with the commits leaving the branch (`reset_impact`) and every uncommitted path that will be lost.
+  - Cherry-pick/revert conflicts stay in progress behind the Abort banner; an empty result is aborted and reported ("already here").
+  - Anything that moves HEAD is disabled while an operation is in progress.
+  - Every hash from the UI is checked to be hex (`check_hash`), so it can't be read as an option or range.
+- File timeline (`log --follow`, with each commit's diff of the file at its path then) and blame (`blame --porcelain` of the working file, uncommitted lines marked) open from a file's diff pane.
 - **Done when:** the graph layout and blame parser are unit-tested, and the actions have live-git tests.
 
 ### Phase 9: Conflicts, partial staging, worktrees, repo setup

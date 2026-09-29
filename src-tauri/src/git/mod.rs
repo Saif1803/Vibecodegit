@@ -6,6 +6,7 @@
 pub mod branches;
 pub mod commit;
 pub mod diff;
+pub mod history;
 pub mod ops;
 pub mod repo;
 pub mod stash;

@@ -10,6 +10,7 @@ use tauri::{AppHandle, Manager};
 use crate::claude;
 use crate::git::commit::{self, CommitOptions, CommitResult, Step, StepState};
 use crate::git::diff::{self, FileDiff, Side};
+use crate::git::history::{self, Blame, CommitDetail, History, ResetMode, TimelineEntry};
 use crate::git::repo::{self, ClaudeRepos, Resolved};
 use crate::git::status::{self, FileChange, RepoStatus};
 use crate::git::branches::{self, Branch};
@@ -234,4 +235,59 @@ pub async fn remove_remote(repo: PathBuf, name: String) -> Result<()> {
 #[tauri::command]
 pub async fn fetch_remote(repo: PathBuf, name: String) -> Result<()> {
     blocking(move || tags::fetch_remote(&repo, &name)).await
+}
+
+// ---- History ----
+
+/// The newest `limit` commits (HEAD and its upstream, or everything when `all`), with the graph.
+#[tauri::command]
+pub async fn history(repo: PathBuf, limit: usize, all: bool) -> Result<History> {
+    blocking(move || history::history(&repo, limit.clamp(1, 20_000), all)).await
+}
+
+#[tauri::command]
+pub async fn commit_detail(repo: PathBuf, hash: String) -> Result<CommitDetail> {
+    blocking(move || history::commit_detail(&repo, &hash)).await
+}
+
+/// Files that differ between two commits, or a commit and the working tree (`target` = None).
+#[tauri::command]
+pub async fn compare_files(repo: PathBuf, base: String, target: Option<String>) -> Result<Vec<FileChange>> {
+    blocking(move || history::compare_files(&repo, &base, target.as_deref())).await
+}
+
+#[tauri::command]
+pub async fn compare_file_diff(repo: PathBuf, base: String, target: Option<String>, file: FileChange) -> Result<FileDiff> {
+    blocking(move || history::compare_file_diff(&repo, &base, target.as_deref(), &file)).await
+}
+
+#[tauri::command]
+pub async fn revert_commit(repo: PathBuf, hash: String) -> Result<Outcome> {
+    blocking(move || history::revert_commit(&repo, &hash)).await
+}
+
+#[tauri::command]
+pub async fn cherry_pick(repo: PathBuf, hash: String) -> Result<Outcome> {
+    blocking(move || history::cherry_pick(&repo, &hash)).await
+}
+
+/// How many commits a reset to `hash` takes off the current branch (for the confirmation).
+#[tauri::command]
+pub async fn reset_impact(repo: PathBuf, hash: String) -> Result<u32> {
+    blocking(move || history::reset_impact(&repo, &hash)).await
+}
+
+#[tauri::command]
+pub async fn reset_to(repo: PathBuf, hash: String, mode: ResetMode) -> Result<Outcome> {
+    blocking(move || history::reset_to(&repo, &hash, mode)).await
+}
+
+#[tauri::command]
+pub async fn file_timeline(repo: PathBuf, path: String) -> Result<Vec<TimelineEntry>> {
+    blocking(move || history::file_timeline(&repo, &path, history::PAGE)).await
+}
+
+#[tauri::command]
+pub async fn blame_file(repo: PathBuf, path: String) -> Result<Blame> {
+    blocking(move || history::blame_file(&repo, &path)).await
 }

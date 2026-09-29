@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { ChangeSide, DiffLine, FileChange, FileDiff } from "../git/types";
-import { FileIcon, MinusIcon, PlusIcon, SpinnerIcon, UndoIcon, XIcon } from "./icons";
+import { BlameIcon, FileIcon, HistoryIcon, MinusIcon, PlusIcon, SpinnerIcon, UndoIcon, XIcon } from "./icons";
 
 interface Props {
   file: FileChange;
@@ -12,6 +12,8 @@ interface Props {
   onStage: () => void;
   onUnstage: () => void;
   onDiscard: () => void;
+  onTimeline: () => void;
+  onBlame: () => void;
 }
 
 const SIDE_LABEL: Record<ChangeSide, string> = {
@@ -29,10 +31,12 @@ const LINE_STYLE: Record<DiffLine["kind"], string> = {
 const SIGN: Record<DiffLine["kind"], string> = { context: " ", add: "+", del: "-", note: "" };
 
 /** The expanded detail pane: one file's diff, VS Code inline style, with its stage actions. */
-export function DiffView({ file, side, diff, error, disabled, onClose, onStage, onUnstage, onDiscard }: Props) {
+export function DiffView({ file, side, diff, error, disabled, onClose, onStage, onUnstage, onDiscard, onTimeline, onBlame }: Props) {
   const slash = file.path.lastIndexOf("/");
   const name = file.path.slice(slash + 1);
   const dir = slash < 0 ? "" : file.path.slice(0, slash);
+  // New files have no history; blame reads the file on disk, so it needs a committed, present file.
+  const committed = file.kind !== "untracked" && file.kind !== "added";
 
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-line bg-bg" aria-label={`Diff of ${file.path}`}>
@@ -45,6 +49,16 @@ export function DiffView({ file, side, diff, error, disabled, onClose, onStage, 
           </span>
         </div>
         <span className="shrink-0 rounded-md bg-chip px-1.5 text-[11px] leading-[18px] text-fg-2">{SIDE_LABEL[side]}</span>
+        {committed && (
+          <HeaderButton label="File timeline" onClick={onTimeline}>
+            <HistoryIcon />
+          </HeaderButton>
+        )}
+        {committed && file.kind !== "deleted" && (
+          <HeaderButton label="Blame" onClick={onBlame}>
+            <BlameIcon />
+          </HeaderButton>
+        )}
         {side === "unstaged" && (
           <HeaderButton label="Discard changes" onClick={onDiscard} disabled={disabled}>
             <UndoIcon />

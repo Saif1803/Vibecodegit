@@ -6,7 +6,7 @@ import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "../App";
-import type { ChangeSide, CommitOptions, FileChange, FileDiff, RepoStatus, Step, StepState, SyncKind } from "../git/types";
+import type { ChangeSide, CommitOptions, FileChange, FileDiff, GraphRow, RefLabel, RepoStatus, Step, StepState, SyncKind } from "../git/types";
 import { initTheme } from "../theme";
 import "../index.css";
 
@@ -223,12 +223,179 @@ function branchCmd(cmd: string, p: Record<string, unknown>) {
   }
 }
 
+// ---- History (the lane layout is a dev-only port of git/history.rs `layout`) ----
+type MockCommit = {
+  hash: string;
+  subject: string;
+  parents: string[];
+  author: string;
+  hoursAgo: number;
+  refs?: RefLabel[];
+  incoming?: boolean;
+  outgoing?: boolean;
+};
+const h = (n: string) => n.padEnd(40, "0");
+const OLDER = ["Commit & Push flow with step progress", "UI states and banners", "Claude session detection", "Tray placement math", "Scaffold Tauri app"];
+const MOCK_COMMITS: MockCommit[] = [
+  { hash: h("0a1b2c3"), subject: "History tab with lane graph", parents: [h("9f8e7d6")], author: "Saif", hoursAgo: 0.3, refs: [{ name: "main", kind: "head" }], outgoing: true },
+  { hash: h("1c2d3e4"), subject: "Teammate: fix tray flicker on wake", parents: [h("9f8e7d6")], author: "Dana", hoursAgo: 1, refs: [{ name: "origin/main", kind: "remote" }], incoming: true },
+  { hash: h("9f8e7d6"), subject: "Merge branch 'feature/branch-picker'", parents: [h("8e7d6c5"), h("7d6c5b4")], author: "Saif", hoursAgo: 3 },
+  { hash: h("7d6c5b4"), subject: "Branch list with tracking badges", parents: [h("6c5b4a3")], author: "Saif", hoursAgo: 5, refs: [{ name: "feature/branch-picker", kind: "branch" }] },
+  { hash: h("8e7d6c5"), subject: "Stash list and detail pane", parents: [h("5b4a392")], author: "Saif", hoursAgo: 6 },
+  { hash: h("6c5b4a3"), subject: "Branch picker skeleton", parents: [h("5b4a392")], author: "Dana", hoursAgo: 8 },
+  { hash: h("5b4a392"), subject: "Phase 6: Rust git layer", parents: [h("4a39200")], author: "Saif", hoursAgo: 30, refs: [{ name: "v0.2.0", kind: "tag" }] },
+  ...Array.from({ length: 14 }, (_, i) => ({
+    hash: h(`4a392${i.toString(16).padStart(2, "0")}`),
+    subject: OLDER[i % 5] + (i >= 5 ? ` (${i})` : ""),
+    parents: i === 13 ? [] : [h(`4a392${(i + 1).toString(16).padStart(2, "0")}`)],
+    author: i % 3 ? "Saif" : "Dana",
+    hoursAgo: 48 + i * 20,
+    refs: i === 13 ? [{ name: "v0.1.0", kind: "tag" as const }] : undefined,
+  })),
+];
+
+function mockLayout(list: MockCommit[]): GraphRow[] {
+  const lanes: ([string, number] | null)[] = [];
+  let next = 0;
+  const free = () => {
+    const i = lanes.indexOf(null);
+    return i >= 0 ? i : lanes.push(null) - 1;
+  };
+  return list.map((c) => {
+    const waiting = lanes.flatMap((l, i) => (l?.[0] === c.hash ? [i] : []));
+    const [col, color] = waiting.length ? [waiting[0], lanes[waiting[0]]![1]] : [free(), next++];
+    const up = waiting.map((i) => ({ col: i, color: lanes[i]![1] }));
+    const through = lanes.flatMap((l, i) => (l && !waiting.includes(i) ? [{ col: i, color: l[1] }] : []));
+    waiting.forEach((i) => (lanes[i] = null));
+    const down = c.parents.map((p, n) => {
+      const k = lanes.findIndex((l) => l?.[0] === p);
+      if (k >= 0) return { col: k, color: lanes[k]![1] };
+      const [slot, co] = n === 0 ? [col, color] : [free(), next++];
+      lanes[slot] = [p, co];
+      return { col: slot, color: co };
+    });
+    while (lanes.length && lanes[lanes.length - 1] === null) lanes.pop();
+    return { col, color, through, up, down };
+  });
+}
+
+function mockHistory(limit: number) {
+  const list = MOCK_COMMITS.slice(0, limit);
+  const rows = mockLayout(list);
+  return {
+    commits: list.map((c, i) => ({
+      hash: c.hash,
+      short: c.hash.slice(0, 7),
+      parents: c.parents,
+      author: c.author,
+      dateMs: Date.now() - c.hoursAgo * HOUR,
+      subject: c.subject,
+      refs: c.refs ?? [],
+      isHead: i === 0,
+      incoming: !!c.incoming,
+      outgoing: !!c.outgoing,
+      graph: rows[i],
+    })),
+    more: MOCK_COMMITS.length > limit,
+    upstream: "origin/main",
+  };
+}
+
+const COMMIT_FILES: FileChange[] = [
+  { path: "src/components/HistoryPanel.tsx", kind: "added" },
+  { path: "src/components/CommitGraph.tsx", kind: "added" },
+  { path: "src/App.tsx", kind: "modified" },
+  { path: "src/components/Tabs.tsx", kind: "modified" },
+  { path: "src/components/StashView.tsx", origPath: "src/components/StashPane.tsx", kind: "renamed" },
+];
+
+const BLAME_TEXT = [
+  'import { useState } from "react";',
+  "",
+  "export default function App() {",
+  "  const visible = useWindowBehavior();",
+  "  const { pref, cycle } = useTheme();",
+  "  const [busy, setBusy] = useState(false);",
+  "  const [committing, setCommitting] = useState(false);",
+  "  const s = useRepoState(visible, busy);",
+  '  const [tab, setTab] = useState<TabId>("history");',
+  "  return <main />;",
+  "}",
+];
+
+function historyCmd(cmd: string, p: Record<string, unknown>) {
+  const find = (hash: unknown) => MOCK_COMMITS.find((c) => c.hash === hash) ?? MOCK_COMMITS[0];
+  const short = (hash: unknown) => (hash as string).slice(0, 7);
+  switch (cmd) {
+    case "history":
+      return mockHistory(p.limit as number);
+    case "commit_detail": {
+      const c = find(p.hash);
+      return {
+        hash: c.hash,
+        short: short(c.hash),
+        parents: c.parents,
+        author: c.author,
+        email: `${c.author.toLowerCase()}@example.com`,
+        dateMs: Date.now() - c.hoursAgo * HOUR,
+        committer: c.author,
+        commitDateMs: Date.now() - c.hoursAgo * HOUR,
+        message: `${c.subject}\n\nLanes are laid out in Rust from --date-order, so the UI only draws them.\nPaged 200 at a time.`,
+        refs: c.refs ?? [],
+        base: c.parents[0] ?? h("4b825dc"),
+        files: COMMIT_FILES,
+      };
+    }
+    case "compare_files":
+      return p.target ? COMMIT_FILES : COMMIT_FILES.slice(2);
+    case "compare_file_diff":
+      return sampleDiff(p.file as FileChange, "staged");
+    case "revert_commit":
+      return { ok: true, message: `Reverted ${short(p.hash)} with a new commit.` };
+    case "cherry_pick":
+      return {
+        ok: false,
+        message: `Cherry-picking ${short(p.hash)} stopped on conflicts. Resolve them in your editor and stage the files, or abort the cherry-pick.`,
+      };
+    case "reset_impact":
+      return 2;
+    case "reset_to":
+      return { ok: true, message: `Reset ${current} to ${short(p.hash)}.${p.mode === "soft" ? " Changes from the undone commits are staged." : ""}` };
+    case "file_timeline":
+      return MOCK_COMMITS.slice(0, 8)
+        .filter((c) => !c.incoming && c.parents.length < 2)
+        .map((c, i, arr) => ({
+          hash: c.hash,
+          short: short(c.hash),
+          author: c.author,
+          dateMs: Date.now() - c.hoursAgo * HOUR,
+          subject: c.subject,
+          base: c.parents[0] ?? h("4b825dc"),
+          file: { path: p.path as string, kind: i === arr.length - 1 ? "added" : "modified" },
+        }));
+    case "blame_file": {
+      const owner = [2, 2, 2, 1, 1, 0, 0, 1, 3, 2, 2];
+      const commits = [0, 4, 6].map((i) => MOCK_COMMITS[i]);
+      return {
+        commits: [
+          ...commits.map((c) => ({ hash: c.hash, short: short(c.hash), author: c.author, dateMs: Date.now() - c.hoursAgo * HOUR, summary: c.subject, uncommitted: false })),
+          { hash: "0".repeat(40), short: "0000000", author: "Not Committed Yet", dateMs: Date.now(), summary: "", uncommitted: true },
+        ],
+        lines: BLAME_TEXT.map((text, i) => ({ commit: owner[i], line: i + 1, text })),
+        truncated: false,
+      };
+    }
+    default:
+      return undefined;
+  }
+}
+
 mockWindows("main");
 mockIPC(
   async (cmd, payload) => {
     const p = (payload ?? {}) as Record<string, unknown>;
     const files = (p.files ?? []) as FileChange[];
-    const other = branchCmd(cmd, p);
+    const other = branchCmd(cmd, p) ?? historyCmd(cmd, p);
     if (other !== undefined) return other;
     switch (cmd) {
       case "claude_repos":

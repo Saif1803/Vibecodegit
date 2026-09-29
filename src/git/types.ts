@@ -162,3 +162,103 @@ export interface Remote {
   fetchUrl: string;
   pushUrl: string;
 }
+
+// ---- History ----
+
+export interface Lane {
+  col: number;
+  /** Palette index; wraps. */
+  color: number;
+}
+
+/** One row of the lane graph; rows stack with no gaps so lanes join up. */
+export interface GraphRow {
+  col: number;
+  color: number;
+  /** Straight through, top to bottom. */
+  through: Lane[];
+  /** From the top of the lane into the dot. */
+  up: Lane[];
+  /** From the dot to the bottom of the lane (one per parent). */
+  down: Lane[];
+}
+
+export type RefKind = "head" | "branch" | "remote" | "tag";
+
+export interface RefLabel {
+  name: string;
+  kind: RefKind;
+}
+
+export interface Commit {
+  hash: string;
+  short: string;
+  parents: string[];
+  author: string;
+  dateMs: number;
+  subject: string;
+  refs: RefLabel[];
+  isHead: boolean;
+  /** On the upstream, not in HEAD yet. */
+  incoming: boolean;
+  /** In HEAD, not on the upstream yet. */
+  outgoing: boolean;
+  graph: GraphRow;
+}
+
+export interface History {
+  commits: Commit[];
+  more: boolean;
+  upstream: string | null;
+}
+
+export interface CommitDetail {
+  hash: string;
+  short: string;
+  parents: string[];
+  author: string;
+  email: string;
+  dateMs: number;
+  committer: string;
+  commitDateMs: number;
+  message: string;
+  refs: RefLabel[];
+  /** First parent, or the empty tree for a root commit. */
+  base: string;
+  files: FileChange[];
+}
+
+export type ResetMode = "soft" | "mixed" | "hard";
+
+export interface TimelineEntry {
+  hash: string;
+  short: string;
+  author: string;
+  dateMs: number;
+  subject: string;
+  base: string;
+  /** The file as it was in this commit. */
+  file: FileChange;
+}
+
+export interface BlameCommit {
+  hash: string;
+  short: string;
+  author: string;
+  dateMs: number;
+  summary: string;
+  uncommitted: boolean;
+}
+
+export interface BlameLine {
+  /** Index into `Blame.commits`. */
+  commit: number;
+  line: number;
+  text: string;
+}
+
+export interface Blame {
+  commits: BlameCommit[];
+  lines: BlameLine[];
+  truncated: boolean;
+}

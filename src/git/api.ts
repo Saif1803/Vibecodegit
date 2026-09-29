@@ -1,15 +1,19 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
+  Blame,
   Branch,
   ChangeSide,
   ClaudeRepos,
+  CommitDetail,
   CommitOptions,
   CommitResult,
   FileChange,
   FileDiff,
+  History,
   Outcome,
   Remote,
   RepoStatus,
+  ResetMode,
   Resolved,
   StashEntry,
   StashMode,
@@ -18,6 +22,7 @@ import type {
   SyncKind,
   SyncResult,
   Tag,
+  TimelineEntry,
 } from "./types";
 
 // The only way the UI touches git: named Rust commands (src-tauri/src/commands.rs).
@@ -89,3 +94,19 @@ export const listRemotes = (repo: string) => invoke<Remote[]>("list_remotes", { 
 export const addRemote = (repo: string, name: string, url: string) => invoke<void>("add_remote", { repo, name, url });
 export const removeRemote = (repo: string, name: string) => invoke<void>("remove_remote", { repo, name });
 export const fetchRemote = (repo: string, name: string) => invoke<void>("fetch_remote", { repo, name });
+
+// ---- History ----
+export const history = (repo: string, limit: number, all: boolean) => invoke<History>("history", { repo, limit, all });
+export const commitDetail = (repo: string, hash: string) => invoke<CommitDetail>("commit_detail", { repo, hash });
+/** `target` null = the working tree. */
+export const compareFiles = (repo: string, base: string, target: string | null) => invoke<FileChange[]>("compare_files", { repo, base, target });
+export const compareFileDiff = (repo: string, base: string, target: string | null, file: FileChange) =>
+  invoke<FileDiff>("compare_file_diff", { repo, base, target, file });
+export const revertCommit = (repo: string, hash: string) => invoke<Outcome>("revert_commit", { repo, hash });
+export const cherryPick = (repo: string, hash: string) => invoke<Outcome>("cherry_pick", { repo, hash });
+/** Commits a reset to `hash` would take off the current branch. */
+export const resetImpact = (repo: string, hash: string) => invoke<number>("reset_impact", { repo, hash });
+/** `hard` discards uncommitted changes: confirm first. */
+export const resetTo = (repo: string, hash: string, mode: ResetMode) => invoke<Outcome>("reset_to", { repo, hash, mode });
+export const fileTimeline = (repo: string, path: string) => invoke<TimelineEntry[]>("file_timeline", { repo, path });
+export const blameFile = (repo: string, path: string) => invoke<Blame>("blame_file", { repo, path });

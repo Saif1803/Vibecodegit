@@ -18,6 +18,8 @@ export interface PanelOps {
   run: (fn: (repo: string) => Promise<unknown>, success?: string) => Promise<string | null>;
   confirm: (r: ConfirmRequest) => void;
   prompt: (r: PromptRequest) => void;
+  /** A success banner for something that didn't touch the repo (e.g. copied a hash). */
+  notify: (text: string) => void;
   /** Changes whenever the repo may have changed; panels refetch on it. */
   version: unknown;
 }

@@ -2,10 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Banner } from "./components/Banner";
 import { BranchesPanel } from "./components/BranchesPanel";
 import { ChangesList, EmptyState } from "./components/ChangesList";
+import { useCommitActions, type CommitRef } from "./components/commitActions";
 import { CommitBox, type CommitAction } from "./components/CommitBox";
+import { CommitView, CompareView } from "./components/CommitView";
 import { ConfirmDialog, type ConfirmRequest } from "./components/ConfirmDialog";
 import { DiffView } from "./components/DiffView";
+import { BlameView, TimelineView } from "./components/FileHistoryViews";
 import { Header } from "./components/Header";
+import { HistoryPanel } from "./components/HistoryPanel";
 import { AlertIcon, CheckCircleIcon, FolderPlusIcon, SpinnerIcon } from "./components/icons";
 import type { PanelOps } from "./components/ListParts";
 import { PromptDialog, type PromptRequest } from "./components/PromptDialog";
@@ -22,8 +26,15 @@ import { useRepoState } from "./state/useRepoState";
 import { useTheme } from "./theme";
 
 type Notice = { tone: "info" | "warning" | "success"; text: string };
-/** What the expanded pane shows: a working-tree file's diff, or a stash. */
-type Detail = { kind: "file"; file: FileChange; side: ChangeSide } | { kind: "stash"; stash: StashEntry };
+/** What the expanded pane shows. `back` is where Esc (or the back arrow) returns to. */
+type Detail = (
+  | { kind: "file"; file: FileChange; side: ChangeSide }
+  | { kind: "stash"; stash: StashEntry }
+  | { kind: "commit"; commit: CommitRef }
+  | { kind: "compare"; base: CommitRef; target: CommitRef | null }
+  | { kind: "timeline"; path: string }
+  | { kind: "blame"; path: string }
+) & { back?: Detail };
 
 const ACTION_KEY = "claudegit.commitAction";
 function readAction(): CommitAction {
@@ -138,8 +149,15 @@ export default function App() {
   };
 
   const panelOps: PanelOps | null = repo
-    ? { repo, busy, run, confirm: setConfirmReq, prompt: setPromptReq, version: st }
+    ? { repo, busy, run, confirm: setConfirmReq, prompt: setPromptReq, notify: (text) => setNotice({ tone: "success", text }), version: st }
     : null;
+
+  /** Open a pane on top of the current one; its back arrow (and Esc) returns here. */
+  const pushDetail = (next: Detail) => setDetail((d) => ({ ...next, back: d ?? undefined }));
+  const openCommit = (commit: CommitRef) => setDetail({ kind: "commit", commit });
+  const commitActions = useCommitActions(panelOps, st, openCommit, (base, target) =>
+    setDetail((d) => ({ kind: "compare", base, target, back: d?.kind === "commit" ? d : undefined })),
+  );
 
   const abortOperation = () => {
     const op = st?.operation;
@@ -287,7 +305,7 @@ export default function App() {
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       if (keys.current.confirming) setConfirming(false);
-      else if (keys.current.detail) setDetail(null);
+      else if (keys.current.detail) setDetail(keys.current.detail.back ?? null);
       else return;
       e.preventDefault();
     };
@@ -426,6 +444,8 @@ export default function App() {
               onCancel={() => setConfirming(false)}
             />
           </>
+        ) : tab === "history" ? (
+          <HistoryPanel ops={panelOps} actions={commitActions} openHash={detail?.kind === "commit" ? detail.commit.hash : null} />
         ) : tab === "branches" ? (
           <BranchesPanel ops={panelOps} />
         ) : tab === "tags" ? (
@@ -450,13 +470,50 @@ export default function App() {
           onStage={() => stage([detail.file])}
           onUnstage={() => unstage([detail.file])}
           onDiscard={() => discard([detail.file])}
+          onTimeline={() => pushDetail({ kind: "timeline", path: detail.file.path })}
+          onBlame={() => pushDetail({ kind: "blame", path: detail.file.path })}
         />
       )}
       {detail?.kind === "stash" && repo && (
         <StashView repo={repo} stash={detail.stash} busy={busy} actions={stashActions} onClose={() => setDetail(null)} />
+      )}
+      {detail?.kind === "commit" && repo && (
+        <CommitView
+          repo={repo}
+          commit={detail.commit}
+          actions={commitActions}
+          onOpenCommit={(commit) => pushDetail({ kind: "commit", commit })}
+          onBack={detail.back && (() => setDetail(detail.back!))}
+          onClose={() => setDetail(null)}
+        />
+      )}
+      {detail?.kind === "compare" && repo && (
+        <CompareView
+          repo={repo}
+          base={detail.base}
+          target={detail.target}
+          version={st}
+          onSwap={() => detail.target && setDetail({ ...detail, base: detail.target, target: detail.base })}
+          onBack={detail.back && (() => setDetail(detail.back!))}
+          onClose={() => setDetail(null)}
+        />
+      )}
+      {(detail?.kind === "timeline" || detail?.kind === "blame") && repo && (
+        <FileHistoryPane
+          kind={detail.kind}
+          repo={repo}
+          path={detail.path}
+          version={st}
+          onOpenCommit={(commit) => pushDetail({ kind: "commit", commit })}
+          onBack={detail.back && (() => setDetail(detail.back!))}
+          onClose={() => setDetail(null)}
+        />
       )}
       {promptReq && <PromptDialog request={promptReq} onClose={() => setPromptReq(null)} />}
       {confirmReq && <ConfirmDialog request={confirmReq} onClose={() => setConfirmReq(null)} />}
     </main>
   );
 }
+
+const FileHistoryPane = ({ kind, ...props }: { kind: "timeline" | "blame" } & Parameters<typeof TimelineView>[0]) =>
+  kind === "timeline" ? <TimelineView {...props} /> : <BlameView {...props} />;
