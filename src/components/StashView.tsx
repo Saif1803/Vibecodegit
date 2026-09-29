@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import * as api from "../git/api";
 import type { FileChange, StashEntry } from "../git/types";
+import { dragWindow } from "../hooks/dragWindow";
 import { HeaderButton } from "./DiffView";
 import { FileListDiff } from "./FileListDiff";
 import { ArrowDownIcon, StashIcon, TrashIcon, UndoIcon, XIcon } from "./icons";
@@ -38,7 +39,7 @@ export function StashView({
 
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-line bg-bg" aria-label={`Stash ${stash.message}`}>
-      <header className="flex h-12 shrink-0 items-center gap-2 px-3">
+      <header onMouseDown={dragWindow} className="flex h-12 shrink-0 items-center gap-2 px-3">
         <StashIcon className="shrink-0 text-fg-3" />
         <span className="min-w-0 flex-1 truncate font-medium text-fg" title={stash.message}>
           {stash.message}

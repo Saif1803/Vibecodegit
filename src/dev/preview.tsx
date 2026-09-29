@@ -1,6 +1,6 @@
 // Dev-only design preview: renders the real App in a plain browser with the Rust commands mocked
 // by an in-memory fake repo. Open /preview.html?s=<scenario> on the Vite dev server.
-// Scenarios: normal | claude | blocked | conflict | pushfail | clean | norepo | unborn | ahead | secrets
+// Scenarios: normal | claude | blocked | conflict | pushfail | clean | norepo | unborn | ahead | secrets | icons
 import { emit } from "@tauri-apps/api/event";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import React from "react";
@@ -28,6 +28,14 @@ let conflicted: FileChange[] = [];
 if (scenario === "clean") (staged = []), (unstaged = []);
 if (scenario === "blocked") conflicted = [{ path: "src/App.tsx", kind: "conflicted" }];
 if (scenario === "secrets") unstaged = [...unstaged, { path: ".env", kind: "untracked" }];
+// One file per file-type icon (src/components/fileIcons.tsx).
+if (scenario === "icons")
+  unstaged = [
+    "a.ts", "a.tsx", "a.js", "a.json", "a.css", "a.scss", "a.html", "a.md", "a.rs", "a.py", "a.go", "a.rb", "a.java",
+    "a.kt", "a.c", "a.cpp", "a.cs", "a.php", "a.vue", "a.svelte", "a.sh", "a.yml", "a.toml", "yarn.lock", "a.png",
+    "a.svg", "a.txt", "LICENSE", "a.pdf", "a.zip", "a.sql", "a.woff2", "a.csv", "package.json", "Dockerfile",
+    ".gitignore", "README",
+  ].map((path) => ({ path, kind: "modified" }));
 let ahead = scenario === "ahead" ? 2 : 0;
 const behind = scenario === "ahead" ? 1 : 0;
 

@@ -13,13 +13,20 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_store::StoreExt;
 
 const MAIN: &str = "main";
 const TRAY: &str = "tray";
 const EDGE_MARGIN: i32 = 12;
-/// Logical sizes: the tray popup, and with a detail pane (diff, commit, graph) open.
+/// Default logical sizes: the tray popup, and with a detail pane (diff, commit, graph) open.
+/// The user can resize either; each mode remembers its own size.
 const COMPACT: (f64, f64) = (380.0, 500.0);
 const EXPANDED: (f64, f64) = (960.0, 640.0);
+/// Smallest sizes the layout still works at (the detail pane sits beside a 380 px column).
+const COMPACT_MIN: (f64, f64) = (340.0, 420.0);
+const EXPANDED_MIN: (f64, f64) = (720.0, 480.0);
+/// Where the dragged position and resized sizes are kept between launches.
+const LAYOUT_STORE: &str = "window.json";
 /// A tray click this soon after a blur-hide is the same click that caused the blur,
 /// so it should leave the window hidden rather than re-open it.
 const BLUR_CLICK_GRACE: Duration = Duration::from_millis(400);
@@ -28,6 +35,9 @@ const BLUR_CLICK_GRACE: Duration = Duration::from_millis(400);
 /// is that steal, so we take focus back instead of hiding.
 const SHOW_GRACE: Duration = Duration::from_millis(500);
 const REFOCUS_DELAY: Duration = Duration::from_millis(60);
+/// Dragging or resizing the window also blurs the webview, while the window itself stays in
+/// front. A blur is only acted on if, this much later, something else really is in front.
+const BLUR_CHECK_DELAY: Duration = Duration::from_millis(120);
 
 #[derive(Default)]
 struct WindowState {
@@ -35,6 +45,72 @@ struct WindowState {
     blur_hide: AtomicBool,
     last_blur_hide: Mutex<Option<Instant>>,
     shown_at: Mutex<Option<Instant>>,
+    layout: Mutex<Layout>,
+}
+
+/// Where the user put the window and how big they made it. Until they drag it, it opens
+/// next to the tray; until they resize a mode, that mode uses its default size.
+#[derive(Debug, Default, Clone, Copy)]
+struct Layout {
+    /// Top-left, physical pixels.
+    pos: Option<(i32, i32)>,
+    /// Logical sizes per mode.
+    compact: Option<(f64, f64)>,
+    expanded: Option<(f64, f64)>,
+    expanded_now: bool,
+    /// The position and inner size we last set, to tell the user's moves and resizes from ours.
+    placed: Option<((i32, i32), (i32, i32))>,
+}
+
+fn load_layout(app: &AppHandle) -> Layout {
+    fn get<T: serde::de::DeserializeOwned>(store: &tauri_plugin_store::Store<tauri::Wry>, key: &str) -> Option<T> {
+        store.get(key).and_then(|v| serde_json::from_value(v).ok())
+    }
+    let Ok(store) = app.store(LAYOUT_STORE) else { return Layout::default() };
+    Layout { pos: get(&store, "pos"), compact: get(&store, "compact"), expanded: get(&store, "expanded"), ..Layout::default() }
+}
+
+fn save_layout(app: &AppHandle, l: &Layout) {
+    let Ok(store) = app.store(LAYOUT_STORE) else { return };
+    let put = |k: &str, v: Option<serde_json::Value>| match v {
+        Some(v) => store.set(k, v),
+        None => {
+            store.delete(k);
+        }
+    };
+    put("pos", l.pos.map(|p| serde_json::json!(p)));
+    put("compact", l.compact.map(|s| serde_json::json!(s)));
+    put("expanded", l.expanded.map(|s| serde_json::json!(s)));
+    let _ = store.save();
+}
+
+/// Record a drag or resize the user made since we last placed the window.
+fn capture(app: &AppHandle, window: &WebviewWindow) {
+    let (Ok(pos), Ok(size), Ok(scale)) = (window.outer_position(), window.inner_size(), window.scale_factor()) else {
+        return;
+    };
+    let state = app.state::<WindowState>();
+    let mut l = state.layout.lock().unwrap();
+    let Some((placed_pos, placed_size)) = l.placed else { return };
+    let (pos, size) = ((pos.x, pos.y), (size.width as i32, size.height as i32));
+    let mut changed = false;
+    if placement::differs(placed_pos, pos) {
+        l.pos = Some(pos);
+        changed = true;
+    }
+    if placement::differs(placed_size, size) {
+        let logical = Some((size.0 as f64 / scale, size.1 as f64 / scale));
+        if l.expanded_now {
+            l.expanded = logical;
+        } else {
+            l.compact = logical;
+        }
+        changed = true;
+    }
+    l.placed = Some((pos, size));
+    if changed {
+        save_layout(app, &l);
+    }
 }
 
 fn toggle_shortcut() -> Shortcut {
@@ -45,50 +121,67 @@ fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(MAIN)
 }
 
-fn position_near_tray(app: &AppHandle, window: &WebviewWindow) -> tauri::Result<()> {
-    let tray = app
-        .tray_by_id(TRAY)
-        .and_then(|t| t.rect().ok().flatten())
-        .map(|r| {
-            let p = r.position.to_physical::<f64>(1.0);
-            let s = r.size.to_physical::<f64>(1.0);
-            Area { x: p.x as i32, y: p.y as i32, w: s.width as i32, h: s.height as i32 }
-        });
+fn tray_rect(app: &AppHandle) -> Option<Area> {
+    app.tray_by_id(TRAY).and_then(|t| t.rect().ok().flatten()).map(|r| {
+        let p = r.position.to_physical::<f64>(1.0);
+        let s = r.size.to_physical::<f64>(1.0);
+        Area { x: p.x as i32, y: p.y as i32, w: s.width as i32, h: s.height as i32 }
+    })
+}
 
-    let monitor = match tray {
-        Some(t) => app.monitor_from_point((t.x + t.w / 2) as f64, (t.y + t.h / 2) as f64)?,
+/// The work area of the monitor under `point` (else the primary one), minus an auto-hide taskbar.
+fn work_area_at(app: &AppHandle, point: Option<(i32, i32)>) -> tauri::Result<Option<Area>> {
+    let monitor = match point {
+        Some((x, y)) => app.monitor_from_point(x as f64, y as f64)?,
         None => None,
     };
     let Some(monitor) = monitor.or(app.primary_monitor()?) else {
-        return Ok(());
+        return Ok(None);
     };
     let wa = monitor.work_area();
-    let mut work = Area {
-        x: wa.position.x,
-        y: wa.position.y,
-        w: wa.size.width as i32,
-        h: wa.size.height as i32,
-    };
+    let mut work = Area { x: wa.position.x, y: wa.position.y, w: wa.size.width as i32, h: wa.size.height as i32 };
     if let Some(bar) = taskbar::rect() {
         work = exclude_bar(work, bar);
     }
+    Ok(Some(work))
+}
 
-    // The expanded size can exceed a small screen: shrink to fit the work area.
-    let size = window.outer_size()?;
-    let w = (size.width as i32).min(work.w - 2 * EDGE_MARGIN);
-    let h = (size.height as i32).min(work.h - 2 * EDGE_MARGIN);
-    if (w, h) != (size.width as i32, size.height as i32) {
-        window.set_size(tauri::PhysicalSize::new(w as u32, h as u32))?;
-    }
-    let (x, y) = place(work, tray, w, h, EDGE_MARGIN);
-    window.set_position(tauri::PhysicalPosition::new(x, y))
+/// Size and place the window for the current mode: the user's size and spot when they
+/// have one, else the default size next to the tray. Always kept on a screen.
+fn arrange(app: &AppHandle, window: &WebviewWindow) -> tauri::Result<()> {
+    let state = app.state::<WindowState>();
+    let l = *state.layout.lock().unwrap();
+    let scale = window.scale_factor()?;
+    let (default, min, saved) = if l.expanded_now { (EXPANDED, EXPANDED_MIN, l.expanded) } else { (COMPACT, COMPACT_MIN, l.compact) };
+    let (lw, lh) = saved.unwrap_or(default);
+    window.set_min_size(Some(tauri::LogicalSize::new(min.0, min.1)))?;
+    let (w, h) = ((lw * scale).round() as i32, (lh * scale).round() as i32);
+
+    let tray = tray_rect(app);
+    let anchor = match (l.pos, tray) {
+        (Some((x, y)), _) => Some((x + w / 2, y + h / 2)),
+        (None, Some(t)) => Some((t.x + t.w / 2, t.y + t.h / 2)),
+        (None, None) => None,
+    };
+    let Some(work) = work_area_at(app, anchor)? else { return Ok(()) };
+    // A size from a bigger screen shrinks to fit this one.
+    let w = w.min(work.w - 2 * EDGE_MARGIN);
+    let h = h.min(work.h - 2 * EDGE_MARGIN);
+    let (x, y) = match l.pos {
+        Some((x, y)) => placement::keep_inside(work, x, y, w, h),
+        None => place(work, tray, w, h, EDGE_MARGIN),
+    };
+    window.set_size(tauri::PhysicalSize::new(w as u32, h as u32))?;
+    window.set_position(tauri::PhysicalPosition::new(x, y))?;
+    state.layout.lock().unwrap().placed = Some(((x, y), (w, h)));
+    Ok(())
 }
 
 fn show(app: &AppHandle) {
     let Some(window) = main_window(app) else { return };
     // Every show starts compact; the webview closes its detail pane on hide.
-    let _ = window.set_size(tauri::LogicalSize::new(COMPACT.0, COMPACT.1));
-    if let Err(e) = position_near_tray(app, &window) {
+    app.state::<WindowState>().layout.lock().unwrap().expanded_now = false;
+    if let Err(e) = arrange(app, &window) {
         eprintln!("positioning failed: {e}");
     }
     *app.state::<WindowState>().shown_at.lock().unwrap() = Some(Instant::now());
@@ -118,13 +211,44 @@ fn on_blur(app: &AppHandle) {
             }
         });
     } else {
-        hide(app);
-        *state.last_blur_hide.lock().unwrap() = Some(Instant::now());
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(BLUR_CHECK_DELAY);
+            let Some(window) = main_window(&app) else { return };
+            let state = app.state::<WindowState>();
+            // Still in front (a drag or resize), already hidden, or a dialog opened meanwhile.
+            if is_foreground(&window) || !window.is_visible().unwrap_or(false) || !state.blur_hide.load(Ordering::Relaxed) {
+                return;
+            }
+            hide(&app);
+            *state.last_blur_hide.lock().unwrap() = Some(Instant::now());
+        });
     }
+}
+
+/// Our window is the foreground window. It stays so while the user drags or resizes it,
+/// even though the webview inside reports losing focus.
+#[cfg(windows)]
+fn is_foreground(window: &WebviewWindow) -> bool {
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetForegroundWindow() -> *mut std::ffi::c_void;
+    }
+    let Ok(hwnd) = window.hwnd() else { return false };
+    // SAFETY: takes no arguments and only returns a window handle (or null).
+    unsafe { GetForegroundWindow() == hwnd.0 }
+}
+
+#[cfg(not(windows))]
+fn is_foreground(window: &WebviewWindow) -> bool {
+    window.is_focused().unwrap_or(false)
 }
 
 fn hide(app: &AppHandle) {
     if let Some(window) = main_window(app) {
+        if window.is_visible().unwrap_or(false) {
+            capture(app, &window);
+        }
         let _ = window.hide();
         let _ = app.emit_to(MAIN, "window-hidden", ());
     }
@@ -157,13 +281,35 @@ fn on_tray_click(app: &AppHandle) {
     }
 }
 
-/// Widens the popup for a detail pane (or shrinks it back), keeping it next to the tray.
+/// Widens the popup for a detail pane (or shrinks it back), at the size the user last gave
+/// that mode, next to the tray or where they dragged it.
 #[tauri::command]
 fn set_expanded(app: AppHandle, expanded: bool) -> Result<(), String> {
     let window = main_window(&app).ok_or("main window missing")?;
-    let (w, h) = if expanded { EXPANDED } else { COMPACT };
-    window.set_size(tauri::LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
-    position_near_tray(&app, &window).map_err(|e| e.to_string())
+    capture(&app, &window);
+    {
+        let state = app.state::<WindowState>();
+        let mut l = state.layout.lock().unwrap();
+        if l.expanded_now == expanded {
+            return Ok(());
+        }
+        l.expanded_now = expanded;
+    }
+    arrange(&app, &window).map_err(|e| e.to_string())
+}
+
+/// Tray menu: forget the dragged position and sizes; back to the default popup by the tray.
+fn reset_layout(app: &AppHandle) {
+    let state = app.state::<WindowState>();
+    let fresh = {
+        let mut l = state.layout.lock().unwrap();
+        *l = Layout { expanded_now: l.expanded_now, ..Layout::default() };
+        *l
+    };
+    save_layout(app, &fresh);
+    if let Some(window) = main_window(app).filter(|w| w.is_visible().unwrap_or(false)) {
+        let _ = arrange(app, &window);
+    }
 }
 
 /// Lets the frontend suspend hide-on-blur while a native dialog is open.
@@ -251,9 +397,13 @@ pub fn run() {
             commands::remove_worktree,
         ])
         .setup(|app| {
+            let layout = load_layout(app.handle());
+            *app.state::<WindowState>().layout.lock().unwrap() = layout;
+
             let show_item = MenuItem::with_id(app, "show", "Show  (Ctrl+Shift+G)", true, None::<&str>)?;
+            let reset_item = MenuItem::with_id(app, "reset", "Reset window position and size", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit ClaudeGit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&show_item, &reset_item, &quit_item])?;
 
             let mut tooltip = String::from("ClaudeGit (Ctrl+Shift+G)");
             if let Err(e) = app.global_shortcut().register(toggle_shortcut()) {
@@ -268,6 +418,7 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => show(app),
+                    "reset" => reset_layout(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })

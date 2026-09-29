@@ -61,26 +61,6 @@ export const ArrowUpIcon = (p: P) => (
   </Icon>
 );
 
-export const SunIcon = (p: P) => (
-  <Icon {...p}>
-    <circle cx="8" cy="8" r="2.75" />
-    <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1" />
-  </Icon>
-);
-
-export const MoonIcon = (p: P) => (
-  <Icon {...p}>
-    <path d="M13 9.5A5.5 5.5 0 0 1 6.5 3a5.5 5.5 0 1 0 6.5 6.5z" />
-  </Icon>
-);
-
-export const MonitorIcon = (p: P) => (
-  <Icon {...p}>
-    <rect x="2" y="2.5" width="12" height="8.5" rx="1.5" />
-    <path d="M6 14h4M8 11v3" />
-  </Icon>
-);
-
 export const SpinnerIcon = (p: P) => (
   <Icon {...p} className={`animate-spin ${p.className ?? ""}`}>
     <path d="M8 2a6 6 0 1 1-6 6" />

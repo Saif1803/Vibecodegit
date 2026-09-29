@@ -1,6 +1,6 @@
 import type { ClaudeSessionRepo, RepoRef, SyncKind } from "../git/types";
-import type { ThemePref } from "../theme";
-import { ArrowDownIcon, ArrowUpIcon, BranchIcon, CloudDownIcon, MonitorIcon, MoonIcon, MoreIcon, RefreshIcon, SunIcon, SyncIcon } from "./icons";
+import { dragWindow } from "../hooks/dragWindow";
+import { ArrowDownIcon, ArrowUpIcon, BranchIcon, CloudDownIcon, MoreIcon, RefreshIcon, SyncIcon } from "./icons";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { RepoPicker } from "./RepoPicker";
 
@@ -11,8 +11,6 @@ interface Props {
   recent: RepoRef[];
   onSelectRepo: (repo: RepoRef) => void;
   onBrowse: () => void;
-  theme: ThemePref;
-  onCycleTheme: () => void;
   onRefresh: () => void;
   refreshing: boolean;
   /** Remote actions; disabled while another operation runs. */
@@ -22,14 +20,12 @@ interface Props {
   onBranchClick: () => void;
 }
 
-const THEME_ICON = { system: MonitorIcon, light: SunIcon, dark: MoonIcon };
 const ICON_BUTTON =
   "flex size-7 shrink-0 items-center justify-center rounded-lg text-fg-3 hover:bg-hover hover:text-fg disabled:opacity-40 disabled:hover:bg-transparent";
 
 export function Header(p: Props) {
-  const ThemeIcon = THEME_ICON[p.theme];
   return (
-    <header className="flex h-12 shrink-0 items-center gap-1.5 px-2.5">
+    <header onMouseDown={dragWindow} className="flex h-12 shrink-0 items-center gap-1.5 px-2.5">
       <RepoPicker current={p.repo} active={p.active} recent={p.recent} onSelect={p.onSelectRepo} onBrowse={p.onBrowse} />
       {p.repo && p.branch !== null && (
         <button
@@ -70,15 +66,6 @@ export function Header(p: Props) {
           );
         }}
       </Menu>
-      <button
-        type="button"
-        onClick={p.onCycleTheme}
-        title={`Theme: ${p.theme}`}
-        aria-label={`Theme: ${p.theme}. Click to change.`}
-        className={ICON_BUTTON}
-      >
-        <ThemeIcon />
-      </button>
     </header>
   );
 }

@@ -1,6 +1,8 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import type { ChangeSide, DiffLine, FileChange, FileDiff, Hunk, HunkAction } from "../git/types";
-import { BlameIcon, FileIcon, HistoryIcon, IgnoreIcon, MinusIcon, PlusIcon, SpinnerIcon, UndoIcon, XIcon } from "./icons";
+import { dragWindow } from "../hooks/dragWindow";
+import { FileTypeIcon } from "./fileIcons";
+import { BlameIcon, HistoryIcon, IgnoreIcon, MinusIcon, PlusIcon, SpinnerIcon, UndoIcon, XIcon } from "./icons";
 
 interface Props {
   file: FileChange;
@@ -45,8 +47,8 @@ export function DiffView({ file, side, diff, error, disabled, onClose, onStage, 
 
   return (
     <section className="flex min-w-0 flex-1 flex-col border-l border-line bg-bg" aria-label={`Diff of ${file.path}`}>
-      <header className="flex h-12 shrink-0 items-center gap-2 px-3">
-        <FileIcon className="shrink-0 text-fg-3" />
+      <header onMouseDown={dragWindow} className="flex h-12 shrink-0 items-center gap-2 px-3">
+        <FileTypeIcon path={file.path} />
         <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
           <span className="truncate font-medium text-fg">{name}</span>
           <span className="min-w-0 shrink-[4] truncate text-[12px] text-fg-3">

@@ -1,4 +1,5 @@
 import type { BranchInfo } from "../git/types";
+import { dragWindow } from "../hooks/dragWindow";
 import { ArrowUpIcon, SyncIcon } from "./icons";
 
 interface Props {
@@ -36,7 +37,7 @@ export function StatusBar({ branch, claudeActive, busy, onSync }: Props) {
     );
 
   return (
-    <div className="flex h-6 items-center gap-2 px-2.5 text-[12px] text-fg-3">
+    <div onMouseDown={dragWindow} className="flex h-6 items-center gap-2 px-2.5 text-[12px] text-fg-3">
       {canSync ? (
         <button
           type="button"

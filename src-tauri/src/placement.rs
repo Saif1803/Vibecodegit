@@ -76,6 +76,18 @@ pub fn exclude_bar(work: Area, bar: Area) -> Area {
     w
 }
 
+/// Where the user left the window, pulled back inside `work` if it has drifted off
+/// (a monitor unplugged, the resolution changed). No margin: it's the user's spot.
+pub fn keep_inside(work: Area, x: i32, y: i32, win_w: i32, win_h: i32) -> (i32, i32) {
+    (clamp(x, work.x, work.right() - win_w), clamp(y, work.y, work.bottom() - win_h))
+}
+
+/// The user moved or resized the window since we placed it: more than a couple of pixels
+/// off on either axis (smaller differences are DPI rounding).
+pub fn differs(placed: (i32, i32), actual: (i32, i32)) -> bool {
+    (placed.0 - actual.0).abs() > 2 || (placed.1 - actual.1).abs() > 2
+}
+
 /// Like `i32::clamp`, but never panics when the window is larger than the area.
 fn clamp(v: i32, lo: i32, hi: i32) -> i32 {
     v.min(hi).max(lo)
@@ -167,6 +179,27 @@ mod tests {
         // Taskbar on another monitor.
         let other = Area { x: 1920, y: 1020, w: 1920, h: 60 };
         assert_eq!(exclude_bar(FULL, other), FULL);
+    }
+
+    #[test]
+    fn a_dragged_window_stays_put_unless_it_drifted_off_screen() {
+        assert_eq!(keep_inside(WORK, 200, 300, W, H), (200, 300));
+        // Flush against the edges is allowed (no margin for the user's spot).
+        assert_eq!(keep_inside(WORK, 0, 1032 - H, W, H), (0, 1032 - H));
+        // A monitor that went away, or a window hanging off the right: pulled back in.
+        assert_eq!(keep_inside(WORK, 2500, -40, W, H), (1920 - W, 0));
+        let second = Area { x: -1920, y: 0, w: 1920, h: 1032 };
+        assert_eq!(keep_inside(second, -100, 900, W, H), (-W, 1032 - H));
+        // Bigger than the area: top-left corner stays visible.
+        let tiny = Area { x: 0, y: 0, w: 300, h: 400 };
+        assert_eq!(keep_inside(tiny, 50, 50, W, H), (0, 0));
+    }
+
+    #[test]
+    fn only_real_moves_and_resizes_count() {
+        assert!(!differs((100, 100), (101, 98)));
+        assert!(differs((100, 100), (140, 100)));
+        assert!(differs((380, 500), (380, 520)));
     }
 
     #[test]

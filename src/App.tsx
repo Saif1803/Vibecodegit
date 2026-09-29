@@ -37,7 +37,6 @@ import { setExpanded, useWindowBehavior } from "./hooks/useWindowBehavior";
 import { samePath } from "./git/repo";
 import { isClaudeActive } from "./state/claudeSessions";
 import { useRepoState } from "./state/useRepoState";
-import { useTheme } from "./theme";
 
 type Notice = { tone: "info" | "warning" | "success"; text: string };
 /** What the expanded pane shows. `back` is where Esc (or the back arrow) returns to. */
@@ -64,7 +63,6 @@ const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
 export default function App() {
   const visible = useWindowBehavior();
-  const { pref, cycle } = useTheme();
   const [busy, setBusy] = useState(false);
   const [committing, setCommitting] = useState(false);
   const s = useRepoState(visible, busy);
@@ -472,8 +470,6 @@ export default function App() {
           recent={s.recent}
           onSelectRepo={(r) => void s.selectRepo(r)}
           onBrowse={() => void s.browse()}
-          theme={pref}
-          onCycleTheme={cycle}
           onRefresh={() => void s.reload()}
           refreshing={s.loading && !!st}
           onSync={(k) => void runSync(k)}

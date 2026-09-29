@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: folder picker and store. All git runs in Rust behind named app commands; window visibility is driven from Rust.",
+  "description": "Main window: folder picker and store. All git runs in Rust behind named app commands; window visibility and placement are driven from Rust; the webview may only start a drag.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open", "store:default"]
+  "permissions": ["core:default", "core:window:allow-start-dragging", "dialog:allow-open", "store:default"]
 }

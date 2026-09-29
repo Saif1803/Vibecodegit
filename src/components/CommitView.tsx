@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import * as api from "../git/api";
 import type { CommitDetail, FileChange } from "../git/types";
+import { dragWindow } from "../hooks/dragWindow";
 import { ago } from "../lib/time";
 import type { CommitActions, CommitRef } from "./commitActions";
 import { HeaderButton } from "./DiffView";
@@ -26,7 +27,7 @@ export function PaneHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 px-3">
+    <header onMouseDown={dragWindow} className="flex h-12 shrink-0 items-center gap-2 px-3">
       {onBack && (
         <HeaderButton label="Back (Esc)" onClick={onBack}>
           <ArrowLeftIcon />

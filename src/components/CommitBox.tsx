@@ -8,6 +8,9 @@ import { StepProgress } from "./StepProgress";
 
 export type CommitAction = "commit-push" | "commit";
 
+/** The commit button's icons, a step down from the 16 px default. */
+const ICON = { width: 14, height: 14 };
+
 interface Props {
   message: string;
   onMessage: (m: string) => void;
@@ -83,7 +86,7 @@ export function CommitBox(p: Props) {
             <button
               type="button"
               onClick={p.onCancel}
-              className="flex h-8 shrink-0 items-center rounded-lg px-2.5 text-fg-2 hover:bg-hover hover:text-fg"
+              className="flex h-7 shrink-0 items-center rounded-lg px-2 text-[12px] text-fg-2 hover:bg-hover hover:text-fg"
             >
               Cancel
             </button>
@@ -91,7 +94,7 @@ export function CommitBox(p: Props) {
               type="button"
               onClick={p.onCommit}
               autoFocus
-              className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 font-medium text-on-accent hover:bg-accent-hover"
+              className="flex h-7 shrink-0 items-center gap-1 rounded-lg bg-accent px-2.5 text-[12px] font-medium text-on-accent hover:bg-accent-hover"
             >
               {p.amend ? "Amend anyway" : "Commit anyway"}
             </button>
@@ -136,17 +139,17 @@ export function CommitBox(p: Props) {
                 type="button"
                 onClick={p.onCommit}
                 disabled={!p.canCommit || p.busy}
-                className="flex h-8 items-center gap-1.5 rounded-l-lg bg-accent pr-2.5 pl-3 font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-chip disabled:text-fg-3"
+                className="flex h-7 items-center gap-1 rounded-l-lg bg-accent pr-2 pl-2.5 text-[12px] font-medium text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-chip disabled:text-fg-3"
               >
-                {p.busy ? <SpinnerIcon /> : p.amend ? <PencilIcon /> : p.action === "commit" ? <CheckIcon /> : <ArrowUpIcon />}
+                {p.busy ? <SpinnerIcon {...ICON} /> : p.amend ? <PencilIcon {...ICON} /> : p.action === "commit" ? <CheckIcon {...ICON} /> : <ArrowUpIcon {...ICON} />}
                 {label}
               </button>
               <Menu
                 label="Commit options"
                 placement="above"
                 disabled={p.busy}
-                trigger={<ChevronDownIcon width={14} height={14} />}
-                className={`flex h-8 w-7 items-center justify-center rounded-r-lg border-l transition-colors ${
+                trigger={<ChevronDownIcon width={12} height={12} />}
+                className={`flex h-7 w-6 items-center justify-center rounded-r-lg border-l transition-colors ${
                   p.canCommit && !p.busy
                     ? "border-on-accent/25 bg-accent text-on-accent hover:bg-accent-hover"
                     : "border-line bg-chip text-fg-3 hover:text-fg-2"

@@ -4,7 +4,7 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 
 ## Stack
 
-- **Tauri 2** (Rust), **React 19 + TypeScript** (Vite 8), **Tailwind CSS v4** (`@tailwindcss/vite`), **Vitest**, `cargo test`
+- **Tauri 2** (Rust), **React 19 + TypeScript** (Vite 8), **Tailwind CSS v4** (`@tailwindcss/vite`), **Vitest**, `cargo test`, **Inter** (`@fontsource-variable/inter`, bundled)
 - **Rust owns all git work** (`src-tauri/src/git/`). It runs the **system `git`** with `std::process::Command`: no shell, one argv item per argument, and no console window (`CREATE_NO_WINDOW`). Git is the only external program. The UI is React on the Claude design system and reaches git only through named Tauri commands (`src-tauri/src/commands.rs`, wrapped in `src/git/api.ts`).
 - Tauri plugins:
   - `tauri-plugin-global-shortcut` registers the Ctrl+Shift+G toggle.
@@ -17,15 +17,18 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 
 ### Tray and window
 - The app lives only in the system tray. It has no taskbar entry (`skipTaskbar: true`) and the window starts hidden.
-- Tray **left-click** toggles the window. The tray **menu** has Show and Quit.
+- Tray **left-click** toggles the window. The tray **menu** has Show, Reset window position and size, and Quit.
 - **Ctrl+Shift+G** (global) toggles the window: show and focus it if hidden, hide it if visible.
-- The window is borderless (`decorations: false`), **380×500** when compact, not resizable, always on top, and sits near the tray.
-  - **Expanded mode:** opening a detail pane (a diff, a commit, the graph) widens the window to about **960×640** (clamped to the work area) via the Rust command `set_expanded(expanded)`. The compact column stays on the left and the detail pane sits on the right. Closing the pane, Esc, or hiding collapses it back.
+- The window is borderless (`decorations: false`), always on top, **380×500** by default when compact, and sits near the tray until you move it.
+  - **Resizable** from its edges (min 340×420 compact, 720×480 expanded). **Draggable** from empty space in the header, the status line, and a detail pane's header (`src/hooks/dragWindow.ts` → `startDragging`, the webview's only window permission).
+  - **Remembered:** on hide (and before switching modes) Rust compares the window with where it last put it (`placement::differs`). A drag saves the position; a resize saves that mode's size. They're kept in the store file `window.json` across launches. A saved position is pulled back on-screen if its monitor is gone (`placement::keep_inside`); sizes shrink to fit a smaller screen. The tray menu's Reset forgets them.
+  - **Expanded mode:** opening a detail pane (a diff, a commit, the graph) switches the window to the expanded size (default about **960×640**, clamped to the work area) via the Rust command `set_expanded(expanded)`. The compact column stays 380 px on the left and the detail pane sits on the right. Closing the pane, Esc, or hiding collapses it back.
   - Placement is custom (`src-tauri/src/placement.rs`, pure and unit-tested). It uses `TrayIcon::rect()`, which works without a prior click, and the monitor work area. The taskbar edge is inferred from where the tray icon sits, and the result is clamped on-screen.
   - With no tray rect, the window falls back to the bottom-right of the work area.
   - With an **auto-hide taskbar**, Windows reports the full monitor as the work area. The taskbar rect (`SHAppBarMessage`, `src-tauri/src/taskbar.rs`) is subtracted, so the window never sits under the taskbar when it slides up.
 - **Hide on blur** and **hide on Esc**.
   - Blur-hide is suppressed while the native folder dialog is open, because the dialog steals focus. The frontend calls the Rust command `set_blur_hide(enabled)`.
+  - Dragging or resizing the window blurs the webview too, but the window stays the foreground window. So a blur is acted on 120 ms later, and only if the window is no longer in front (`GetForegroundWindow`).
   - **Tray-click focus quirks (Windows):**
     - Explorer re-activates the taskbar right after a tray click. A blur within 500 ms of showing therefore re-focuses the window once, instead of hiding it.
     - A tray click within 400 ms of a blur-hide is the click that caused that blur, so it leaves the window hidden.
@@ -79,15 +82,16 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 - **Look:** the Claude desktop app's visual language.
   - Warm neutral surfaces, hairline borders, 8–16 px radii, and the Claude clay accent `#D97757`.
   - Line icons at 1.4 px stroke, inline SVG in `src/components/icons.tsx`. No icon library and no Anthropic logos.
+  - File rows (changes list, commit/stash/compare file lists, diff header) carry a VS Code (Seti)-style file-type icon from `src/components/fileIcons.tsx`: picked by whole file name, then extension (`fileType`, unit-tested), colored with the `--ft-*` tokens (`text-ft-blue`, …).
 - **Themes:** light and dark are both first-class.
-  - The default follows the OS (`prefers-color-scheme`, live). A header button cycles System → Light → Dark, persisted in `localStorage`.
+  - Always follows the OS (`prefers-color-scheme`, live). There's no theme switch in the app.
   - `src/theme.ts` sets `<html data-theme>`.
 - **Tokens:** CSS variables in `src/index.css`, exposed to Tailwind via `@theme inline`.
   - Classes: `bg-bg`, `bg-surface`, `bg-raised`, `bg-chip`, `bg-hover`, `border-line`, `border-line-strong`, `text-fg`, `text-fg-2`, `text-fg-3`, `bg-accent`, `text-accent-text`, `text-st-*`.
   - Never hard-code hex values in components.
   - Dark values were sampled from the app: bg `#151515`, surface `#1A1A19`, raised `#20201F`, chip `#2D2D2D`, line `#2A2A2A`, fg `#F0EFEC` / `#C3C2B7` / `#898781`.
   - Light values use Claude's ivory palette: bg `#FAF9F5`, fg `#141413`.
-- **Type:** Segoe UI Variable. Claude's own fonts are proprietary and aren't bundled. 13 px body, 11–12 px secondary, Cascadia Mono for status letters.
+- **Type:** Inter (variable, with the optical-size axis), bundled from `@fontsource-variable/inter` because the CSP only allows the app's own fonts; Segoe UI Variable is the fallback. Claude's own fonts are proprietary and aren't bundled. 13 px body, 11–12 px secondary. Cascadia Mono stays for code: diffs, blame, hashes, status letters.
 - **Patterns:**
   - Commit box: styled like Claude's prompt box. Rounded-2xl raised surface, with the textarea above an action row.
   - Primary button: accent fill. When disabled, it becomes a neutral chip, not a faded accent.
@@ -132,16 +136,16 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
   - End-to-end cases use a local bare remote plus a "teammate" clone (`with_remote`).
   - Clones must set `core.autocrlf=false` at clone time, since your global `autocrlf=true` would make every file look modified.
   - Test file names must be valid on Windows (no `*`, `?`, `:`).
-- **Vitest (`npm test`):** UI-side logic only: path compare, MRU, auto-select, Claude-active window, graph width, prompt → commit message.
-- **UI states:** `npm run dev`, then open `http://localhost:1420/preview.html?s=normal|claude|blocked|conflict|pushfail|clean|norepo|unborn|ahead|secrets`.
+- **Vitest (`npm test`):** UI-side logic only: path compare, MRU, auto-select, Claude-active window, graph width, prompt → commit message, file name → icon type.
+- **UI states:** `npm run dev`, then open `http://localhost:1420/preview.html?s=normal|claude|blocked|conflict|pushfail|clean|norepo|unborn|ahead|secrets|icons` (`icons` lists one file per file-type icon).
   - This is the real App with the Rust commands mocked by an in-memory fake repo (`src/dev/preview.tsx`). It's dev-only and not part of the build.
-  - Emulate 380×500 for compact and 960×640 for the diff pane.
+  - Emulate 380×500 for compact and 960×640 for the diff pane; also check the 340×420 minimum.
 - Don't drive the user's real desktop with synthetic mouse or keyboard input to test the tray app. Use the preview, read-only window queries, and logs.
 
 ### Security / capabilities
-- `src-tauri/capabilities/default.json` grants only `core:default`, `dialog:allow-open` and `store:default`.
+- `src-tauri/capabilities/default.json` grants only `core:default`, `core:window:allow-start-dragging`, `dialog:allow-open` and `store:default`.
   - There's no shell plugin at all. Git access is only through the app's own named commands, which take typed arguments (paths, file lists, options), never raw git args.
-- The global shortcut, window placement, tray, and single-instance are driven **from Rust only**. They have no JS packages and grant no webview permissions.
+- The global shortcut, window placement and sizing, tray, and single-instance are driven **from Rust only**. They have no JS packages and grant no webview permissions; the webview can only start a drag.
 - The CSP is explicit in `tauri.conf.json`.
   - `style-src` includes `'unsafe-inline'`, and `dangerousDisableAssetCspModification: ["style-src"]` is set because Vite/Tailwind inject `<style>` tags and a Tauri nonce would disable `'unsafe-inline'`.
   - Everything else is `'self'` plus IPC.
@@ -151,11 +155,11 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 src/
   main.tsx, App.tsx
   index.css                              # design tokens (light/dark) + Tailwind entry
-  theme.ts                               # system/light/dark preference -> <html data-theme>
+  theme.ts                               # OS light/dark -> <html data-theme>, live
   git/types.ts                           # TS mirrors of the Rust serde types
   git/api.ts                             # typed invoke wrappers: the UI's only way to reach git
   git/repo.ts                            # path normalize/compare for the UI
-  components/icons.tsx, Header.tsx, StatusBar.tsx, Banner.tsx, StepProgress.tsx
+  components/icons.tsx, fileIcons.tsx, Header.tsx, StatusBar.tsx, Banner.tsx, StepProgress.tsx
   components/RepoPicker.tsx, ChangesList.tsx, CommitBox.tsx, DiffView.tsx, ConfirmDialog.tsx, PromptDialog.tsx, Menu.tsx
   components/Tabs.tsx, ListParts.tsx, BranchesPanel.tsx, TagsPanel.tsx, StashesPanel.tsx, StashView.tsx
   components/HistoryPanel.tsx, CommitGraph.tsx, commitActions.tsx, CommitView.tsx, FileHistoryViews.tsx, FileListDiff.tsx

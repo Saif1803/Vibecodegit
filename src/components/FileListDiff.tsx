@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { errorText } from "../git/api";
 import type { FileChange, FileDiff } from "../git/types";
 import { DiffBody } from "./DiffView";
+import { FileTypeIcon } from "./fileIcons";
 
 const LETTER: Record<string, string> = { modified: "M", added: "A", deleted: "D", renamed: "R", untracked: "U", conflicted: "!" };
 const TONE: Record<string, string> = {
@@ -68,6 +69,7 @@ export function FileListDiff({
                   selected === f ? "bg-hover" : "hover:bg-hover"
                 }`}
               >
+                <FileTypeIcon path={f.path} className={f.kind === "deleted" ? "opacity-50" : ""} />
                 <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                   <span className={`truncate text-fg ${f.kind === "deleted" ? "line-through decoration-fg-3" : ""}`}>{f.path.slice(slash + 1)}</span>
                   <span className="min-w-0 shrink-[4] truncate text-[12px] text-fg-3">

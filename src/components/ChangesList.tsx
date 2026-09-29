@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { ChangeKind, ChangeSide, FileChange } from "../git/types";
+import { FileTypeIcon } from "./fileIcons";
 import { ChevronDownIcon, IgnoreIcon, MinusIcon, PlusIcon, UndoIcon } from "./icons";
 
 const BADGE: Record<ChangeKind, { letter: string; className: string; label: string }> = {
@@ -161,6 +162,7 @@ function Section({
                     isActive ? "bg-hover" : "hover:bg-hover"
                   }`}
                 >
+                  <FileTypeIcon path={f.path} className={f.kind === "deleted" ? "opacity-50" : ""} />
                   <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                     <span className={`min-w-0 truncate ${f.kind === "deleted" ? "text-fg-3 line-through" : "text-fg"}`}>{name}</span>
                     <span className="min-w-0 shrink-[4] truncate text-[12px] text-fg-3">
