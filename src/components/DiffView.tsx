@@ -64,31 +64,38 @@ export function DiffView({ file, side, diff, error, disabled, onClose, onStage, 
         </HeaderButton>
       </header>
 
-      <div className="mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-surface">
-        {error ? (
-          <Notice>{error}</Notice>
-        ) : !diff ? (
-          <Notice>
-            <SpinnerIcon />
-          </Notice>
-        ) : diff.binary ? (
-          <Notice>Binary file. No text diff to show.</Notice>
-        ) : diff.hunks.length === 0 ? (
-          <Notice>{file.kind === "renamed" ? "Renamed without content changes." : "No changes to show."}</Notice>
-        ) : (
-          <div className="min-h-0 flex-1 overflow-auto font-mono text-[12px] leading-[19px] select-text">
-            <table className="min-w-full border-collapse">
-              <tbody>
-                {diff.hunks.map((h, i) => (
-                  <HunkRows key={i} header={h.header} lines={h.lines} />
-                ))}
-              </tbody>
-            </table>
-            {diff.truncated && <p className="px-3 py-2 font-sans text-[12px] text-fg-3">Diff truncated at 5,000 lines.</p>}
-          </div>
-        )}
-      </div>
+      <DiffBody diff={diff} error={error} emptyText={file.kind === "renamed" ? "Renamed without content changes." : "No changes to show."} />
     </section>
+  );
+}
+
+/** The bordered, scrollable diff itself (or a loading / binary / empty notice). */
+export function DiffBody({ diff, error, emptyText }: { diff: FileDiff | null; error: string | null; emptyText: string }) {
+  return (
+    <div className="mx-3 mb-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-surface">
+      {error ? (
+        <Notice>{error}</Notice>
+      ) : !diff ? (
+        <Notice>
+          <SpinnerIcon />
+        </Notice>
+      ) : diff.binary ? (
+        <Notice>Binary file. No text diff to show.</Notice>
+      ) : diff.hunks.length === 0 ? (
+        <Notice>{emptyText}</Notice>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto font-mono text-[12px] leading-[19px] select-text">
+          <table className="min-w-full border-collapse">
+            <tbody>
+              {diff.hunks.map((h, i) => (
+                <HunkRows key={i} header={h.header} lines={h.lines} />
+              ))}
+            </tbody>
+          </table>
+          {diff.truncated && <p className="px-3 py-2 font-sans text-[12px] text-fg-3">Diff truncated at 5,000 lines.</p>}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -124,7 +131,7 @@ function Notice({ children }: { children: ReactNode }) {
   return <div className="flex flex-1 items-center justify-center px-6 text-center text-[12px] text-fg-3">{children}</div>;
 }
 
-function HeaderButton({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: ReactNode }) {
+export function HeaderButton({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: ReactNode }) {
   return (
     <button
       type="button"

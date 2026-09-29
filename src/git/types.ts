@@ -85,11 +85,7 @@ export type CommitResult =
   | { ok: false; step: Step; message: string; hash: string | null };
 
 export type SyncKind = "fetch" | "pull" | "push" | "sync";
-export interface SyncResult {
-  ok: boolean;
-  message: string;
-  warning?: string;
-}
+export type SyncResult = Outcome;
 
 export interface RepoRef {
   /** Absolute repo root. */
@@ -118,4 +114,51 @@ export interface ClaudeRepos {
   nonRepos: RawSession[];
   /** The newest session overall. */
   newestSessionId: string | null;
+}
+
+/** `{ ok, message, warning? }` from multi-step operations (sync, merge, rebase, stash apply). */
+export interface Outcome {
+  ok: boolean;
+  message: string;
+  warning?: string;
+}
+
+export interface Branch {
+  /** "main", or "origin/main" for a remote branch. */
+  name: string;
+  /** The remote of a remote-tracking branch; null for local branches. */
+  remote: string | null;
+  current: boolean;
+  commit: string;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  /** The upstream was deleted on the remote. */
+  gone: boolean;
+  dateMs: number;
+  subject: string;
+}
+
+export interface StashEntry {
+  index: number;
+  hash: string;
+  dateMs: number;
+  message: string;
+  branch: string | null;
+}
+
+export type StashMode = "tracked" | "include-untracked" | "staged";
+
+export interface Tag {
+  name: string;
+  commit: string;
+  annotated: boolean;
+  subject: string;
+  dateMs: number;
+}
+
+export interface Remote {
+  name: string;
+  fetchUrl: string;
+  pushUrl: string;
 }

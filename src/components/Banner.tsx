@@ -5,10 +5,12 @@ interface Props {
   tone: "info" | "warning" | "success";
   children: ReactNode;
   onDismiss?: () => void;
+  /** A button after the text (e.g. "Abort merge"). */
+  action?: ReactNode;
 }
 
 /** Inline notice styled like the Claude app's callouts: tinted surface, icon, hairline border. */
-export function Banner({ tone, children, onDismiss }: Props) {
+export function Banner({ tone, children, onDismiss, action }: Props) {
   const Icon = tone === "warning" ? AlertIcon : tone === "success" ? CheckCircleIcon : InfoIcon;
   return (
     <div
@@ -27,6 +29,7 @@ export function Banner({ tone, children, onDismiss }: Props) {
         className={`mt-0.5 shrink-0 ${tone === "warning" ? "text-st-deleted" : tone === "success" ? "text-st-added" : "text-fg-3"}`}
       />
       <div className="min-w-0 flex-1 break-words whitespace-pre-line select-text">{children}</div>
+      {action}
       {onDismiss && (
         <button
           type="button"

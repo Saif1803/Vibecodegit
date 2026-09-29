@@ -179,3 +179,38 @@ export const PencilIcon = (p: P) => (
     <path d="M10.5 3 13 5.5l-7 7H3.5V10z" />
   </Icon>
 );
+
+export const TagIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M2.5 3.5v4l6 6 5-5-6-6h-4a1 1 0 0 0-1 1z" />
+    <circle cx="5.5" cy="5.5" r="1" />
+  </Icon>
+);
+
+export const StashIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M2.5 9.5v3a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-3" />
+    <path d="M2.5 9.5h3l1 1.5h3l1-1.5h3M4.5 7h7M5.5 4.5h5" />
+  </Icon>
+);
+
+export const CloudIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M4.5 12.5a3 3 0 0 1-.4-5.97A4 4 0 0 1 11.9 6.5a3 3 0 0 1 .1 6z" />
+  </Icon>
+);
+
+export const MergeIcon = (p: P) => (
+  <Icon {...p}>
+    <circle cx="4.5" cy="3.5" r="1.5" />
+    <circle cx="4.5" cy="12.5" r="1.5" />
+    <circle cx="11.5" cy="9" r="1.5" />
+    <path d="M4.5 5v6M4.5 5c0 2.5 2.5 4 5.5 4" />
+  </Icon>
+);
+
+export const TrashIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5" />
+  </Icon>
+);

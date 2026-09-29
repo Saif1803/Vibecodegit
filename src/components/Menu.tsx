@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CheckIcon } from "./icons";
 
 /**
@@ -23,7 +23,10 @@ export function Menu({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -37,17 +40,39 @@ export function Menu({
         setOpen(false);
       }
     };
+    // Fixed-position menus don't follow their trigger when a list scrolls, so close instead.
+    const onScroll = (e: Event) => {
+      if (!menu.current?.contains(e.target as Node)) setOpen(false);
+    };
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey, true);
+    window.addEventListener("scroll", onScroll, true);
     return () => {
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [open]);
 
+  // Fixed positioning escapes the scrolling lists that would clip the menu. Measure after the
+  // first render, then place it next to the trigger, flipping to the other side if it won't fit.
+  useLayoutEffect(() => {
+    if (!open) return setPos(null);
+    const t = button.current!.getBoundingClientRect();
+    const m = menu.current!.getBoundingClientRect();
+    const below = t.bottom + 4;
+    const above = t.top - 4 - m.height;
+    const fitsBelow = below + m.height <= window.innerHeight - 8;
+    const fitsAbove = above >= 8;
+    const top = placement === "above" ? (fitsAbove || !fitsBelow ? above : below) : fitsBelow || !fitsAbove ? below : above;
+    const left = align === "right" ? t.right - m.width : t.left;
+    setPos({ top: Math.max(8, top), left: Math.min(Math.max(8, left), window.innerWidth - m.width - 8) });
+  }, [open, align, placement]);
+
   return (
-    <div ref={root} className="relative flex">
+    <div ref={root} className="flex">
       <button
+        ref={button}
         type="button"
         onClick={() => setOpen((o) => !o)}
         disabled={disabled}
@@ -61,10 +86,10 @@ export function Menu({
       </button>
       {open && (
         <div
+          ref={menu}
           role="menu"
-          className={`absolute z-30 min-w-[190px] rounded-xl border border-line bg-raised p-1 shadow-pop ${
-            align === "right" ? "right-0" : "left-0"
-          } ${placement === "below" ? "top-full mt-1" : "bottom-full mb-1"}`}
+          style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? "visible" : "hidden" }}
+          className="fixed z-30 min-w-[190px] rounded-xl border border-line bg-raised p-1 shadow-pop"
         >
           {children(() => setOpen(false))}
         </div>

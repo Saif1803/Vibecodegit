@@ -12,8 +12,11 @@ use crate::git::commit::{self, CommitOptions, CommitResult, Step, StepState};
 use crate::git::diff::{self, FileDiff, Side};
 use crate::git::repo::{self, ClaudeRepos, Resolved};
 use crate::git::status::{self, FileChange, RepoStatus};
+use crate::git::branches::{self, Branch};
+use crate::git::stash::{self, StashEntry, StashMode};
 use crate::git::sync::{self, SyncKind, SyncResult};
-use crate::git::{ops, Result};
+use crate::git::tags::{self, Remote, Tag};
+use crate::git::{ops, Outcome, Result};
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
@@ -95,4 +98,140 @@ pub async fn commit_push(repo: PathBuf, opts: CommitOptions, on_step: Channel<St
 #[tauri::command]
 pub async fn sync(repo: PathBuf, kind: SyncKind) -> Result<SyncResult> {
     blocking(move || Ok(sync::run_sync(&repo, kind))).await
+}
+
+// ---- Branches ----
+
+#[tauri::command]
+pub async fn list_branches(repo: PathBuf) -> Result<Vec<Branch>> {
+    blocking(move || branches::list_branches(&repo)).await
+}
+
+#[tauri::command]
+pub async fn create_branch(repo: PathBuf, name: String, start: Option<String>, switch_to: bool) -> Result<()> {
+    blocking(move || branches::create_branch(&repo, &name, start.as_deref(), switch_to)).await
+}
+
+#[tauri::command]
+pub async fn switch_branch(repo: PathBuf, name: String) -> Result<()> {
+    blocking(move || branches::switch_branch(&repo, &name)).await
+}
+
+#[tauri::command]
+pub async fn checkout_remote_branch(repo: PathBuf, name: String) -> Result<String> {
+    blocking(move || branches::checkout_remote(&repo, &name)).await
+}
+
+#[tauri::command]
+pub async fn rename_branch(repo: PathBuf, old: String, new: String) -> Result<()> {
+    blocking(move || branches::rename_branch(&repo, &old, &new)).await
+}
+
+#[tauri::command]
+pub async fn delete_branch(repo: PathBuf, name: String, force: bool) -> Result<()> {
+    blocking(move || branches::delete_branch(&repo, &name, force)).await
+}
+
+#[tauri::command]
+pub async fn delete_remote_branch(repo: PathBuf, remote: String, branch: String) -> Result<()> {
+    blocking(move || branches::delete_remote_branch(&repo, &remote, &branch)).await
+}
+
+#[tauri::command]
+pub async fn merge_branch(repo: PathBuf, name: String) -> Result<Outcome> {
+    blocking(move || branches::merge_branch(&repo, &name)).await
+}
+
+#[tauri::command]
+pub async fn rebase_onto(repo: PathBuf, onto: String) -> Result<Outcome> {
+    blocking(move || branches::rebase_onto(&repo, &onto)).await
+}
+
+#[tauri::command]
+pub async fn abort_operation(repo: PathBuf) -> Result<()> {
+    blocking(move || branches::abort_operation(&repo)).await
+}
+
+// ---- Stashes ----
+
+#[tauri::command]
+pub async fn list_stashes(repo: PathBuf) -> Result<Vec<StashEntry>> {
+    blocking(move || stash::list_stashes(&repo)).await
+}
+
+#[tauri::command]
+pub async fn stash_push(repo: PathBuf, message: String, mode: StashMode) -> Result<()> {
+    blocking(move || stash::stash_push(&repo, &message, mode)).await
+}
+
+#[tauri::command]
+pub async fn stash_apply(repo: PathBuf, index: u32, hash: String, pop: bool) -> Result<Outcome> {
+    blocking(move || stash::stash_apply(&repo, index, &hash, pop)).await
+}
+
+#[tauri::command]
+pub async fn stash_drop(repo: PathBuf, index: u32, hash: String) -> Result<()> {
+    blocking(move || stash::stash_drop(&repo, index, &hash)).await
+}
+
+#[tauri::command]
+pub async fn stash_clear(repo: PathBuf) -> Result<()> {
+    blocking(move || stash::stash_clear(&repo)).await
+}
+
+#[tauri::command]
+pub async fn stash_files(repo: PathBuf, hash: String) -> Result<Vec<FileChange>> {
+    blocking(move || stash::stash_files(&repo, &hash)).await
+}
+
+#[tauri::command]
+pub async fn stash_file_diff(repo: PathBuf, hash: String, file: FileChange) -> Result<FileDiff> {
+    blocking(move || stash::stash_file_diff(&repo, &hash, &file)).await
+}
+
+// ---- Tags and remotes ----
+
+#[tauri::command]
+pub async fn list_tags(repo: PathBuf) -> Result<Vec<Tag>> {
+    blocking(move || tags::list_tags(&repo)).await
+}
+
+#[tauri::command]
+pub async fn create_tag(repo: PathBuf, name: String, message: String, target: Option<String>) -> Result<()> {
+    blocking(move || tags::create_tag(&repo, &name, &message, target.as_deref())).await
+}
+
+#[tauri::command]
+pub async fn delete_tag(repo: PathBuf, name: String) -> Result<()> {
+    blocking(move || tags::delete_tag(&repo, &name)).await
+}
+
+#[tauri::command]
+pub async fn push_tag(repo: PathBuf, remote: String, name: String) -> Result<()> {
+    blocking(move || tags::push_tag(&repo, &remote, &name)).await
+}
+
+#[tauri::command]
+pub async fn delete_remote_tag(repo: PathBuf, remote: String, name: String) -> Result<()> {
+    blocking(move || tags::delete_remote_tag(&repo, &remote, &name)).await
+}
+
+#[tauri::command]
+pub async fn list_remotes(repo: PathBuf) -> Result<Vec<Remote>> {
+    blocking(move || tags::list_remotes(&repo)).await
+}
+
+#[tauri::command]
+pub async fn add_remote(repo: PathBuf, name: String, url: String) -> Result<()> {
+    blocking(move || tags::add_remote(&repo, &name, &url)).await
+}
+
+#[tauri::command]
+pub async fn remove_remote(repo: PathBuf, name: String) -> Result<()> {
+    blocking(move || tags::remove_remote(&repo, &name)).await
+}
+
+#[tauri::command]
+pub async fn fetch_remote(repo: PathBuf, name: String) -> Result<()> {
+    blocking(move || tags::fetch_remote(&repo, &name)).await
 }

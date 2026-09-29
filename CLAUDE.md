@@ -156,7 +156,8 @@ src/
   git/api.ts                             # typed invoke wrappers: the UI's only way to reach git
   git/repo.ts                            # path normalize/compare for the UI
   components/icons.tsx, Header.tsx, StatusBar.tsx, Banner.tsx, StepProgress.tsx
-  components/RepoPicker.tsx, ChangesList.tsx, CommitBox.tsx, DiffView.tsx, ConfirmDialog.tsx, Menu.tsx
+  components/RepoPicker.tsx, ChangesList.tsx, CommitBox.tsx, DiffView.tsx, ConfirmDialog.tsx, PromptDialog.tsx, Menu.tsx
+  components/Tabs.tsx, ListParts.tsx, BranchesPanel.tsx, TagsPanel.tsx, StashesPanel.tsx, StashView.tsx
   state/recentRepos.ts                   # plugin-store MRU
   state/claudeSessions.ts                # auto-select rule, Claude-active window
   state/pickFolder.ts                    # dialog + set_blur_hide pause
@@ -167,7 +168,7 @@ src-tauri/
   src/lib.rs                             # tray, shortcut, show/hide/blur/expand, plugin + command registration
   src/commands.rs                        # the Tauri commands the webview may call
   src/git/mod.rs                         # the git runner (argv only, stdin pathspecs, no console window)
-  src/git/status.rs, ops.rs, diff.rs, sync.rs, commit.rs, repo.rs
+  src/git/status.rs, ops.rs, diff.rs, sync.rs, commit.rs, repo.rs, branches.rs, stash.rs, tags.rs (+ remotes)
   src/git/testutil.rs                    # throwaway repos + bare remotes for tests
   src/placement.rs                       # pure placement math (unit-tested)
   src/taskbar.rs                         # Windows taskbar rect via SHAppBarMessage
@@ -189,7 +190,7 @@ src-tauri/
 - TS types in `src/git/types.ts` mirror the serde types; change both together.
 - No new dependencies beyond the stack above without asking.
 
-## Plan (10 phases; stop for review after each. Phases 1–5 are done.)
+## Plan (10 phases; stop for review after each. Phases 1–7 are done.)
 
 ### Phase 1: Scaffold and lockdown
 - `create-tauri-app` (React + TS + Vite), Tailwind v4 wired in, Vitest set up.
@@ -243,11 +244,21 @@ src-tauri/
 - **Done when:** tests pass (parser, ops against real git, diff parser, commit flows including amend), and the preview shows staged/unstaged sections and a diff.
 
 ### Phase 7: Tabs, branches, stashes, tags, remotes
-- A tab strip in the compact column: **Changes · History · Branches · Stashes**.
-- Branches: list local and remote branches with ahead/behind. Create (from HEAD or any ref), switch, rename, delete (confirm; force only after a second confirm), merge into current, rebase current onto, and publish.
-- Stashes: Stash / Stash (include untracked) / Stash staged (git ≥ 2.35). List, view the diff, apply, pop, drop, and drop all (confirm).
-- Tags: create (lightweight or annotated), delete, push. Remotes: list, add, remove, fetch one.
-- **Done when:** each operation has a live-git test and a preview scenario.
+- A segmented tab strip under the status bar: **Changes · Branches · Tags · Stashes** (History joins in Phase 8). The commit box only shows on Changes, and the header's branch chip opens Branches.
+- Branches (`git/branches.rs`, `BranchesPanel`): local branches, then each remote's, newest first, with ↑↓ / "gone" / "local only" badges and a filter.
+  - Clicking a row switches to it; a remote branch checks out as a tracking branch (or switches to the existing local one).
+  - The row's ⋯ menu has: new branch from here, publish, merge into current, rebase current onto (confirm; conflicts are undone like pull), rename, and delete.
+  - Delete is confirmed, and `-D` needs a second confirmation after git says "not fully merged". Delete-from-remote is confirmed too.
+  - Names are checked with `check-ref-format` first.
+  - Remotes live here as group headers: fetch one, remove (confirm), and "Add remote…" (names/URLs starting with `-` are refused).
+- A merge that stops on conflicts stays in progress. The blocker banner gets an **Abort** button (`abort_operation`, confirmed) until Phase 9 adds full resolution.
+- Stashes (`git/stash.rs`, `StashesPanel`, `StashView`): message + split button (Stash / include untracked / staged only), and a list.
+  - Clicking a stash opens its files and diffs in the expanded pane. Apply and pop use `--index`, falling back to a plain apply with a warning.
+  - A conflicting pop keeps the stash. Drop and drop-all are confirmed.
+  - Every index-based operation first checks that `stash@{n}` is still the hash the UI showed.
+- Tags (`git/tags.rs`, `TagsPanel`): new tag on HEAD (annotated when it has a message), push to a remote, delete, and delete from a remote (confirmed).
+- Menus use fixed positioning, so they escape scrolling lists and flip upward near the bottom.
+- **Done when:** each operation has a live-git test and the tabs render in the preview.
 
 ### Phase 8: History and recovery
 - History tab: `git log --graph`-style lane graph (computed in Rust from `--format=%H %P …`), paged 200 at a time, with incoming/outgoing markers.

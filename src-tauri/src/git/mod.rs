@@ -3,12 +3,15 @@
 //!
 //! The webview can't run git at all; it can only call the named commands in `commands.rs`.
 
+pub mod branches;
 pub mod commit;
 pub mod diff;
 pub mod ops;
 pub mod repo;
+pub mod stash;
 pub mod status;
 pub mod sync;
+pub mod tags;
 #[cfg(test)]
 pub mod testutil;
 
@@ -20,6 +23,25 @@ use std::process::{Command, Stdio};
 const GLOBAL_ARGS: [&str; 4] = ["-c", "core.quotepath=off", "-c", "color.ui=false"];
 
 pub type Result<T> = std::result::Result<T, String>;
+
+/// A user-facing result for multi-step operations: ok or not, what happened, and
+/// anything worth knowing even on success. `{ ok, message, warning? }` in JSON.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Outcome {
+    pub ok: bool,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+impl Outcome {
+    pub fn ok(message: impl Into<String>, warning: Option<String>) -> Self {
+        Outcome { ok: true, message: message.into(), warning }
+    }
+    pub fn fail(message: impl Into<String>) -> Self {
+        Outcome { ok: false, message: message.into(), warning: None }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Output {

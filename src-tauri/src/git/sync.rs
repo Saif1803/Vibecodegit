@@ -2,10 +2,10 @@
 
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use super::status::{in_progress_operation, Operation};
-use super::{git, run, Result};
+use super::{git, run, Outcome, Result};
 
 pub const STASH_MESSAGE: &str = "claudegit: other changes during pull";
 
@@ -47,31 +47,42 @@ pub fn pull_rebase(repo: &Path) -> Result<PullOutcome> {
     if behind == 0 {
         return Ok(PullOutcome::Ok { pulled: 0, warning: None });
     }
+    let conflict = "Pulled changes conflict with your commits. The rebase was undone; pull and resolve in your editor.";
+    Ok(match rebase_keeping_changes(repo, "@{u}", STASH_MESSAGE, conflict)? {
+        Ok(warning) => PullOutcome::Ok { pulled: behind, warning },
+        Err(message) => PullOutcome::Failed(message),
+    })
+}
 
+/// Rebase the current branch onto `onto` with other local changes stashed around it and
+/// restored with `--index`. A conflicting rebase is aborted, never left half-done.
+/// Ok(warning) on success; Err(message) when the rebase didn't happen.
+pub fn rebase_keeping_changes(
+    repo: &Path,
+    onto: &str,
+    stash_message: &str,
+    conflict_message: &str,
+) -> Result<std::result::Result<Option<String>, String>> {
     let dirty = is_dirty(repo)?;
     if dirty {
-        git(repo, &["stash", "push", "--quiet", "-m", STASH_MESSAGE])?;
+        git(repo, &["stash", "push", "--quiet", "-m", stash_message])?;
     }
 
-    let rebase = run(repo, &["rebase", "--no-autostash", "@{u}"])?;
-    let mut outcome = PullOutcome::Ok { pulled: behind, warning: None };
+    let rebase = run(repo, &["rebase", "--no-autostash", onto])?;
+    let mut outcome = Ok(None);
     if !rebase.ok() {
         let conflicted = in_progress_operation(repo)? == Some(Operation::Rebase);
         if conflicted {
             run(repo, &["rebase", "--abort"])?;
         }
-        outcome = PullOutcome::Failed(if conflicted {
-            "Pulled changes conflict with your commits. The rebase was undone; pull and resolve in your editor.".into()
-        } else {
-            rebase.message()
-        });
+        outcome = Err(if conflicted { conflict_message.to_owned() } else { rebase.message() });
     }
 
     if dirty {
-        if let Some(note) = restore_stash(repo)? {
+        if let Some(note) = restore_stash(repo, stash_message)? {
             outcome = match outcome {
-                PullOutcome::Ok { pulled, .. } => PullOutcome::Ok { pulled, warning: Some(note) },
-                PullOutcome::Failed(m) => PullOutcome::Failed(format!("{m}\n{note}")),
+                Ok(_) => Ok(Some(note)),
+                Err(m) => Err(format!("{m}\n{note}")),
             };
         }
     }
@@ -80,12 +91,12 @@ pub fn pull_rebase(repo: &Path) -> Result<PullOutcome> {
 
 /// Pops our stash keeping staged state; returns a note if that wasn't fully possible.
 /// Never discards anything: on a real conflict the stash is left in place (git keeps it).
-fn restore_stash(repo: &Path) -> Result<Option<String>> {
+fn restore_stash(repo: &Path, stash_message: &str) -> Result<Option<String>> {
     if run(repo, &["stash", "pop", "--index", "--quiet"])?.ok() {
         return Ok(None);
     }
     let conflict_note = format!(
-        "Your other changes conflict with what was pulled. Resolve the conflicts in your editor; a copy is kept in `git stash` (\"{STASH_MESSAGE}\")."
+        "Your other changes conflict with the new commits. Resolve the conflicts in your editor; a copy is kept in `git stash` (\"{stash_message}\")."
     );
     // `--index` refuses up front when the staged state can't be rebuilt; the tree is untouched then.
     if is_dirty(repo)? {
@@ -121,46 +132,31 @@ pub enum SyncKind {
     Sync,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SyncResult {
-    pub ok: bool,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub warning: Option<String>,
-}
-
-impl SyncResult {
-    fn ok(message: impl Into<String>, warning: Option<String>) -> Self {
-        SyncResult { ok: true, message: message.into(), warning }
-    }
-    fn fail(message: impl Into<String>) -> Self {
-        SyncResult { ok: false, message: message.into(), warning: None }
-    }
-}
+pub type SyncResult = Outcome;
 
 /// The header menu / status-bar actions: one call, one human-readable outcome.
 pub fn run_sync(repo: &Path, kind: SyncKind) -> SyncResult {
     match sync_inner(repo, kind) {
         Ok(r) => r,
-        Err(e) => SyncResult::fail(e),
+        Err(e) => Outcome::fail(e),
     }
 }
 
 fn sync_inner(repo: &Path, kind: SyncKind) -> Result<SyncResult> {
     if kind == SyncKind::Fetch {
         git(repo, &["fetch", "--all", "--prune", "--quiet"])?;
-        return Ok(SyncResult::ok("Fetched from all remotes.", None));
+        return Ok(Outcome::ok("Fetched from all remotes.", None));
     }
     let mut pulled_note = String::new();
     let mut warning = None;
     if matches!(kind, SyncKind::Pull | SyncKind::Sync) {
         if upstream_of(repo)?.is_none() {
             if kind == SyncKind::Pull {
-                return Ok(SyncResult::fail("This branch has no upstream to pull from. Publish it first."));
+                return Ok(Outcome::fail("This branch has no upstream to pull from. Publish it first."));
             }
         } else {
             match pull_rebase(repo)? {
-                PullOutcome::Failed(m) => return Ok(SyncResult::fail(m)),
+                PullOutcome::Failed(m) => return Ok(Outcome::fail(m)),
                 PullOutcome::Ok { pulled, warning: w } => {
                     warning = w;
                     pulled_note = match pulled {
@@ -172,14 +168,14 @@ fn sync_inner(repo: &Path, kind: SyncKind) -> Result<SyncResult> {
             }
         }
         if kind == SyncKind::Pull {
-            return Ok(SyncResult::ok(pulled_note, warning));
+            return Ok(Outcome::ok(pulled_note, warning));
         }
     }
     match push(repo, false)? {
-        None => Ok(SyncResult::fail("No origin remote to push to.")),
+        None => Ok(Outcome::fail("No origin remote to push to.")),
         Some(to) => {
             let msg = [pulled_note, format!("Pushed to {to}.")].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(" ");
-            Ok(SyncResult::ok(msg, warning))
+            Ok(Outcome::ok(msg, warning))
         }
     }
 }
@@ -199,7 +195,7 @@ mod tests {
         sh(&r.me, &["commit", "-qam", "mine"]);
 
         let res = run_sync(&r.me, SyncKind::Sync);
-        assert_eq!(res, SyncResult::ok("Pulled 1 commit. Pushed to origin/main.", None));
+        assert_eq!(res, Outcome::ok("Pulled 1 commit. Pushed to origin/main.", None));
         assert_eq!(log(&r.remote, "main"), vec!["mine", "theirs", "init"]);
     }
 

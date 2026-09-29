@@ -1,21 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { Banner } from "./components/Banner";
+import { BranchesPanel } from "./components/BranchesPanel";
 import { ChangesList, EmptyState } from "./components/ChangesList";
 import { CommitBox, type CommitAction } from "./components/CommitBox";
 import { ConfirmDialog, type ConfirmRequest } from "./components/ConfirmDialog";
 import { DiffView } from "./components/DiffView";
 import { Header } from "./components/Header";
 import { AlertIcon, CheckCircleIcon, FolderPlusIcon, SpinnerIcon } from "./components/icons";
+import type { PanelOps } from "./components/ListParts";
+import { PromptDialog, type PromptRequest } from "./components/PromptDialog";
+import { StashesPanel, type StashActions } from "./components/StashesPanel";
+import { StashView } from "./components/StashView";
 import { StatusBar } from "./components/StatusBar";
+import { Tabs, type TabId } from "./components/Tabs";
+import { TagsPanel } from "./components/TagsPanel";
 import * as api from "./git/api";
-import type { ChangeSide, CommitResult, FileChange, FileDiff, Step, StepState, SyncKind } from "./git/types";
+import type { ChangeSide, CommitResult, FileChange, FileDiff, Outcome, StashEntry, Step, StepState, SyncKind } from "./git/types";
 import { setExpanded, useWindowBehavior } from "./hooks/useWindowBehavior";
 import { isClaudeActive } from "./state/claudeSessions";
 import { useRepoState } from "./state/useRepoState";
 import { useTheme } from "./theme";
 
 type Notice = { tone: "info" | "warning" | "success"; text: string };
-type Detail = { file: FileChange; side: ChangeSide };
+/** What the expanded pane shows: a working-tree file's diff, or a stash. */
+type Detail = { kind: "file"; file: FileChange; side: ChangeSide } | { kind: "stash"; stash: StashEntry };
 
 const ACTION_KEY = "claudegit.commitAction";
 function readAction(): CommitAction {
@@ -46,6 +54,8 @@ export default function App() {
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
+  const [promptReq, setPromptReq] = useState<PromptRequest | null>(null);
+  const [tab, setTab] = useState<TabId>("changes");
   const input = useRef<HTMLTextAreaElement>(null);
 
   const repo = s.repo?.path ?? null;
@@ -85,6 +95,62 @@ export default function App() {
     const failure = await s.mutate(fn);
     setBusy(false);
     if (failure) setNotice({ tone: "warning", text: failure });
+  };
+
+  /**
+   * Branch / tag / stash / remote actions: busy state, a result banner, and a status refresh.
+   * An Outcome result becomes the banner; a string result is the success text.
+   */
+  const run = async (fn: (repo: string) => Promise<unknown>, success?: string): Promise<string | null> => {
+    setBusy(true);
+    setNotice(null);
+    let next: Notice | null = success ? { tone: "success", text: success } : null;
+    const failure = await s.mutate(async (r) => {
+      const out = await fn(r);
+      if (typeof out === "string") next = { tone: "success", text: out };
+      else if (out && typeof out === "object" && "ok" in out) {
+        const o = out as Outcome;
+        next = { tone: !o.ok ? "warning" : o.warning ? "info" : "success", text: `${o.message}${o.warning ? `\n${o.warning}` : ""}` };
+      }
+    });
+    setBusy(false);
+    setNotice(failure ? { tone: "warning", text: failure } : next);
+    return failure;
+  };
+
+  const stashActions: StashActions = {
+    apply: (stash, pop) => {
+      void run((r) => api.stashApply(r, stash, pop)).then(() => {
+        if (pop) setDetail((d) => (d?.kind === "stash" && d.stash.hash === stash.hash ? null : d));
+      });
+    },
+    drop: (stash) =>
+      setConfirmReq({
+        title: `Drop ${stash.message}?`,
+        body: "The stash is deleted. Its changes are gone unless they were applied somewhere.",
+        confirmLabel: "Drop stash",
+        danger: true,
+        onConfirm: () => {
+          setDetail((d) => (d?.kind === "stash" && d.stash.hash === stash.hash ? null : d));
+          void run((r) => api.stashDrop(r, stash), `Dropped stash@{${stash.index}}.`);
+        },
+      }),
+  };
+
+  const panelOps: PanelOps | null = repo
+    ? { repo, busy, run, confirm: setConfirmReq, prompt: setPromptReq, version: st }
+    : null;
+
+  const abortOperation = () => {
+    const op = st?.operation;
+    if (!op) return;
+    setConfirmReq({
+      title: `Abort the ${op}?`,
+      body: `Puts the repo back to how it was before the ${op} started. Any conflict resolution you've done for it is lost.`,
+      confirmLabel: `Abort ${op}`,
+      danger: true,
+      onConfirm: () => void run((r) => api.abortOperation(r), `Aborted the ${op}.`),
+    });
   };
 
   const stage = (files: FileChange[]) => void op((r) => api.stage(r, files));
@@ -180,17 +246,17 @@ export default function App() {
   const openDiff = (file: FileChange, side: ChangeSide) => {
     setDiff(null);
     setDiffError(null);
-    setDetail({ file, side });
+    setDetail({ kind: "file", file, side });
   };
 
   // Keep the open diff in step with the repo: follow a file that moved lists, close it if it's gone.
   useEffect(() => {
-    if (!detail || !st || !repo) return;
+    if (detail?.kind !== "file" || !st || !repo) return;
     const lists: Record<ChangeSide, FileChange[]> = { staged: st.staged, unstaged: st.unstaged, conflicted: st.conflicted };
     const here = lists[detail.side].find((f) => f.path === detail.file.path);
     if (!here) {
       const side = (["unstaged", "staged", "conflicted"] as ChangeSide[]).find((x) => lists[x].some((f) => f.path === detail.file.path));
-      setDetail(side ? { file: lists[side].find((f) => f.path === detail.file.path)!, side } : null);
+      setDetail(side ? { kind: "file", file: lists[side].find((f) => f.path === detail.file.path)!, side } : null);
       return;
     }
     let stale = false;
@@ -207,11 +273,11 @@ export default function App() {
   useEffect(() => setExpanded(expanded), [expanded]);
 
   // Ctrl+Enter from anywhere in the popup.
-  const keys = useRef({ requestCommit, confirming, detail, confirmReq });
-  keys.current = { requestCommit, confirming, detail, confirmReq };
+  const keys = useRef({ requestCommit, confirming, detail, dialog: !!(confirmReq || promptReq), tab });
+  keys.current = { requestCommit, confirming, detail, dialog: !!(confirmReq || promptReq), tab };
   useEffect(() => {
     const onCtrlEnter = (e: KeyboardEvent) => {
-      if (e.key === "Enter" && e.ctrlKey && !keys.current.confirmReq) {
+      if (e.key === "Enter" && e.ctrlKey && !keys.current.dialog && keys.current.tab === "changes") {
         e.preventDefault();
         keys.current.requestCommit();
       }
@@ -239,6 +305,7 @@ export default function App() {
     else {
       setConfirming(false);
       setConfirmReq(null);
+      setPromptReq(null);
       setDetail(null);
     }
   }, [visible]);
@@ -293,51 +360,86 @@ export default function App() {
           refreshing={s.loading && !!st}
           onSync={(k) => void runSync(k)}
           canSync={!busy && !!st && st.branch.head !== null}
+          onBranchClick={() => setTab("branches")}
         />
         <StatusBar branch={st?.branch ?? null} claudeActive={claudeActive} busy={busy} onSync={() => void runSync("sync")} />
         <div className="h-1.5 shrink-0" />
+        {s.repo && st && <Tabs tab={tab} onTab={setTab} changes={total} />}
         {notice && (
           <Banner tone={notice.tone} onDismiss={() => setNotice(null)}>
             {notice.text}
           </Banner>
         )}
-        {blocker && !notice && <Banner tone="warning">{blocker}</Banner>}
+        {blocker && !notice && (
+          <Banner
+            tone="warning"
+            action={
+              st?.operation && (
+                <button
+                  type="button"
+                  onClick={abortOperation}
+                  disabled={busy}
+                  className="-my-0.5 shrink-0 rounded-md border border-line bg-raised px-2 text-[12px] leading-5 text-fg-2 hover:text-fg disabled:opacity-40"
+                >
+                  Abort {st.operation}
+                </button>
+              )
+            }
+          >
+            {blocker}
+          </Banner>
+        )}
         {s.notice && (
           <Banner tone="info" onDismiss={s.dismissNotice}>
             {s.notice}
           </Banner>
         )}
-        <ChangesList
-          staged={staged}
-          unstaged={unstaged}
-          conflicted={conflicted}
-          active={detail ? { path: detail.file.path, side: detail.side } : null}
-          disabled={busy}
-          empty={empty}
-          open={openDiff}
-          stage={stage}
-          unstage={unstage}
-          discard={discard}
-        />
-        <CommitBox
-          inputRef={input}
-          message={message}
-          onMessage={setMessage}
-          canCommit={canCommit}
-          busy={committing}
-          stepOrder={stepOrder}
-          steps={steps}
-          confirming={confirming}
-          action={action}
-          onAction={setAction}
-          amend={amend}
-          onAmend={setAmend}
-          hint={hint}
-          onCommit={requestCommit}
-          onCancel={() => setConfirming(false)}
-        />
+        {tab === "changes" || !panelOps ? (
+          <>
+            <ChangesList
+              staged={staged}
+              unstaged={unstaged}
+              conflicted={conflicted}
+              active={detail?.kind === "file" ? { path: detail.file.path, side: detail.side } : null}
+              disabled={busy}
+              empty={empty}
+              open={openDiff}
+              stage={stage}
+              unstage={unstage}
+              discard={discard}
+            />
+            <CommitBox
+              inputRef={input}
+              message={message}
+              onMessage={setMessage}
+              canCommit={canCommit}
+              busy={committing}
+              stepOrder={stepOrder}
+              steps={steps}
+              confirming={confirming}
+              action={action}
+              onAction={setAction}
+              amend={amend}
+              onAmend={setAmend}
+              hint={hint}
+              onCommit={requestCommit}
+              onCancel={() => setConfirming(false)}
+            />
+          </>
+        ) : tab === "branches" ? (
+          <BranchesPanel ops={panelOps} />
+        ) : tab === "tags" ? (
+          <TagsPanel ops={panelOps} />
+        ) : (
+          <StashesPanel
+            ops={panelOps}
+            open={(stash) => setDetail({ kind: "stash", stash })}
+            openHash={detail?.kind === "stash" ? detail.stash.hash : null}
+            actions={stashActions}
+          />
+        )}
       </div>
-      {detail && (
+      {detail?.kind === "file" && (
         <DiffView
           file={detail.file}
           side={detail.side}
@@ -350,6 +452,10 @@ export default function App() {
           onDiscard={() => discard([detail.file])}
         />
       )}
+      {detail?.kind === "stash" && repo && (
+        <StashView repo={repo} stash={detail.stash} busy={busy} actions={stashActions} onClose={() => setDetail(null)} />
+      )}
+      {promptReq && <PromptDialog request={promptReq} onClose={() => setPromptReq(null)} />}
       {confirmReq && <ConfirmDialog request={confirmReq} onClose={() => setConfirmReq(null)} />}
     </main>
   );

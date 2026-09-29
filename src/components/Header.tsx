@@ -18,6 +18,8 @@ interface Props {
   /** Remote actions; disabled while another operation runs. */
   onSync: (kind: SyncKind) => void;
   canSync: boolean;
+  /** The branch chip opens the Branches tab. */
+  onBranchClick: () => void;
 }
 
 const THEME_ICON = { system: MonitorIcon, light: SunIcon, dark: MoonIcon };
@@ -30,10 +32,15 @@ export function Header(p: Props) {
     <header className="flex h-12 shrink-0 items-center gap-1.5 px-2.5">
       <RepoPicker current={p.repo} active={p.active} recent={p.recent} onSelect={p.onSelectRepo} onBrowse={p.onBrowse} />
       {p.repo && p.branch !== null && (
-        <span className="flex h-[22px] max-w-[120px] min-w-0 shrink-0 items-center gap-1 rounded-md bg-chip px-1.5 text-[12px] text-fg-2">
+        <button
+          type="button"
+          onClick={p.onBranchClick}
+          title="Branches"
+          className="flex h-[22px] max-w-[120px] min-w-0 shrink-0 items-center gap-1 rounded-md bg-chip px-1.5 text-[12px] text-fg-2 hover:text-fg"
+        >
           <BranchIcon width={12} height={12} className="shrink-0" />
           <span className="truncate">{p.branch}</span>
-        </span>
+        </button>
       )}
       <button type="button" onClick={p.onRefresh} disabled={!p.repo} title="Refresh" aria-label="Refresh" className={`ml-auto ${ICON_BUTTON}`}>
         <RefreshIcon className={p.refreshing ? "animate-spin" : undefined} />

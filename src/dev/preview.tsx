@@ -32,13 +32,13 @@ const behind = scenario === "ahead" ? 1 : 0;
 
 function status(): RepoStatus {
   const branch = {
-    head: "main",
+    head: current,
     hasCommits: scenario !== "unborn",
-    upstream: scenario === "unborn" ? null : "origin/main",
+    upstream: scenario === "unborn" ? null : `origin/${current}`,
     ahead,
     behind,
   };
-  const operation = scenario === "blocked" ? ("merge" as const) : null;
+  const operation = scenario === "blocked" && conflicted.length > 0 ? ("merge" as const) : null;
   const blocker = operation ? "Merge in progress with conflicts. Finish or abort it in your editor first." : null;
   return { branch, staged, unstaged, conflicted, operation, blocker };
 }
@@ -133,11 +133,103 @@ async function sync(kind: SyncKind) {
   return { ok: true, message: kind === "sync" ? "Already up to date. Pushed to origin/main." : "Pushed to origin/main." };
 }
 
+const HOUR = 3_600_000;
+let current = "main";
+let branches = [
+  { name: "main", remote: null, commit: "3f9c2ab", upstream: "origin/main", ahead: 0, behind: 0, gone: false, dateMs: Date.now() - HOUR, subject: "Commit & Push flow with step progress" },
+  { name: "feature/branch-picker", remote: null, commit: "91be0c4", upstream: "origin/feature/branch-picker", ahead: 2, behind: 1, gone: false, dateMs: Date.now() - 3 * HOUR, subject: "Branch list with tracking badges" },
+  { name: "spike/blame", remote: null, commit: "c01d2e3", upstream: null, ahead: 0, behind: 0, gone: false, dateMs: Date.now() - 50 * HOUR, subject: "Try git blame --porcelain" },
+  { name: "fix/old-tray", remote: null, commit: "77aa001", upstream: "origin/fix/old-tray", ahead: 0, behind: 0, gone: true, dateMs: Date.now() - 200 * HOUR, subject: "Tray icon fix" },
+  { name: "origin/main", remote: "origin", commit: "3f9c2ab", upstream: null, ahead: 0, behind: 0, gone: false, dateMs: Date.now() - HOUR, subject: "Commit & Push flow with step progress" },
+  { name: "origin/feature/branch-picker", remote: "origin", commit: "5d4c3b2", upstream: null, ahead: 0, behind: 0, gone: false, dateMs: Date.now() - 2 * HOUR, subject: "Teammate: tweak spacing" },
+];
+let tags = [
+  { name: "v0.2.0", commit: "3f9c2ab", annotated: true, subject: "Phase 6: Rust git layer", dateMs: Date.now() - 2 * HOUR },
+  { name: "v0.1.0", commit: "b60d4de", annotated: false, subject: "Claude desktop app design system", dateMs: Date.now() - 400 * HOUR },
+];
+let stashes = [
+  { index: 0, hash: "aaaa1111", dateMs: Date.now() - 20 * 60_000, message: "before trying the new placement math", branch: "main" },
+  { index: 1, hash: "bbbb2222", dateMs: Date.now() - 30 * HOUR, message: "WIP on feature/branch-picker: 91be0c4 Branch list", branch: "feature/branch-picker" },
+];
+const reindex = () => (stashes = stashes.map((s, index) => ({ ...s, index })));
+
+function branchCmd(cmd: string, p: Record<string, unknown>) {
+  switch (cmd) {
+    case "list_branches":
+      return branches.map((b) => ({ ...b, current: b.name === current }));
+    case "list_remotes":
+      return [{ name: "origin", fetchUrl: "https://github.com/saif/claudegit.git", pushUrl: "https://github.com/saif/claudegit.git" }];
+    case "create_branch":
+      branches = [{ ...branches[0], name: p.name as string, upstream: null, dateMs: Date.now() }, ...branches];
+      if (p.switchTo) current = p.name as string;
+      return null;
+    case "switch_branch":
+      current = p.name as string;
+      return null;
+    case "checkout_remote_branch":
+      current = (p.name as string).split("/").slice(1).join("/");
+      return current;
+    case "rename_branch":
+      branches = branches.map((b) => (b.name === p.old ? { ...b, name: p.new as string } : b));
+      if (current === p.old) current = p.new as string;
+      return null;
+    case "delete_branch":
+      if (!p.force && p.name === "spike/blame") throw "error: the branch 'spike/blame' is not fully merged.";
+      branches = branches.filter((b) => b.name !== p.name);
+      return null;
+    case "merge_branch":
+      return { ok: true, message: `Merged ${p.name}.` };
+    case "rebase_onto":
+      return { ok: false, message: `Rebasing onto ${p.onto} conflicts with your commits. The rebase was undone.` };
+    case "list_tags":
+      return tags;
+    case "create_tag":
+      tags = [{ name: p.name as string, commit: "3f9c2ab", annotated: !!p.message, subject: (p.message as string) || "Commit & Push flow", dateMs: Date.now() }, ...tags];
+      return null;
+    case "delete_tag":
+      tags = tags.filter((t) => t.name !== p.name);
+      return null;
+    case "list_stashes":
+      return stashes;
+    case "stash_push":
+      if (staged.length + unstaged.length === 0) throw "No local changes to stash.";
+      stashes = [{ index: 0, hash: `s${Date.now()}`, dateMs: Date.now(), message: (p.message as string) || "WIP on main: 3f9c2ab Commit & Push flow", branch: "main" }, ...stashes];
+      reindex();
+      if (p.mode === "staged") staged = [];
+      else (staged = []), (unstaged = p.mode === "tracked" ? unstaged.filter((f) => f.kind === "untracked") : []);
+      return null;
+    case "stash_apply":
+      if (p.pop) (stashes = stashes.filter((s) => s.hash !== p.hash)), reindex();
+      return { ok: true, message: `${p.pop ? "Popped" : "Applied"} stash@{${p.index}}.` };
+    case "stash_drop":
+      stashes = stashes.filter((s) => s.hash !== p.hash);
+      reindex();
+      return null;
+    case "stash_clear":
+      stashes = [];
+      return null;
+    case "stash_files":
+      return [
+        { path: "src-tauri/src/placement.rs", kind: "modified" },
+        { path: "notes/placement-ideas.md", kind: "untracked" },
+      ];
+    case "stash_file_diff":
+      return sampleDiff(p.file as FileChange, "unstaged");
+    case "abort_operation":
+      conflicted = [];
+      return null;
+    default:
+      return undefined;
+  }
+}
+
 mockWindows("main");
 mockIPC(
   async (cmd, payload) => {
     const p = (payload ?? {}) as Record<string, unknown>;
     const files = (p.files ?? []) as FileChange[];
+    const other = branchCmd(cmd, p);
+    if (other !== undefined) return other;
     switch (cmd) {
       case "claude_repos":
         return scenario === "norepo"
