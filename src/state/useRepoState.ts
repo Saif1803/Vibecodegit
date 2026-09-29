@@ -26,7 +26,7 @@ const EMPTY_CLAUDE: ClaudeRepos = { repos: [], nonRepos: [] };
 export const CLAUDE_POLL_MS = 5_000;
 
 /** All repo/Claude state for the popup. Refreshes on each show; polls Claude only while `visible`. */
-export function useRepoState(visible: boolean, run: GitRunner = tauriGit) {
+export function useRepoState(visible: boolean, busy = false, run: GitRunner = tauriGit) {
   const [state, setState] = useState<RepoState>({
     repo: null,
     status: null,
@@ -150,16 +150,26 @@ export function useRepoState(visible: boolean, run: GitRunner = tauriGit) {
     await Promise.all([pollClaude(), repo ? loadStatus(repo) : Promise.resolve()]);
   }, [pollClaude, loadStatus]);
 
+  /** After Commit & Push: the repo counts as recent, and its status changed. */
+  const afterCommit = useCallback(async () => {
+    const repo = latest.current.repo;
+    if (!repo) return;
+    const recent = await rememberRepo(repo).catch(() => latest.current.recent);
+    patch({ recent });
+    await loadStatus(repo);
+  }, [patch, loadStatus]);
+
   // Refresh on each show, then poll Claude activity until hidden.
   const wasVisible = useRef(false);
   useEffect(() => {
     const shownNow = visible && !wasVisible.current;
     wasVisible.current = visible;
     if (!visible) return;
-    if (shownNow) void refresh();
+    // Don't re-select or re-read the repo under a running Commit & Push.
+    if (shownNow && !busy) void refresh();
     const timer = window.setInterval(() => void pollClaude(), CLAUDE_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [visible, refresh, pollClaude]);
+  }, [visible, busy, refresh, pollClaude]);
 
   // Preload at launch so the first show is instant.
   useEffect(() => {
@@ -178,5 +188,5 @@ export function useRepoState(visible: boolean, run: GitRunner = tauriGit) {
     };
   }, [run, refresh, patch]);
 
-  return { ...state, refresh, reload, selectRepo, browse, toggle, toggleAll, dismissNotice };
+  return { ...state, refresh, reload, afterCommit, selectRepo, browse, toggle, toggleAll, dismissNotice };
 }

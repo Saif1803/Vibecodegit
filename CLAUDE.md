@@ -94,16 +94,36 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
   - It never goes through a shell and never uses string concatenation, so the commit message and paths are passed as discrete argv items.
 - Env on every call: `GIT_TERMINAL_PROMPT=0`, so a missing credential fails fast instead of hanging. Git Credential Manager's GUI prompt still works.
 - Also on every call: `-c core.quotepath=off`, `-c color.ui=false`.
-- Status: `git status --porcelain=v2 --branch -z --untracked-files=all`, parsed in TS. This covers branch, upstream, ahead/behind, and entries, including renames and unmerged files.
+- Status: `git --no-optional-locks status --porcelain=v2 --branch -z --untracked-files=all`, parsed in TS. This covers branch, upstream, ahead/behind, and entries, including renames and unmerged files.
+  - `--no-optional-locks` stops the background status from holding `index.lock` while a commit (ours, Claude's, or a terminal's) needs it.
 - **Checkbox semantics:** the checkboxes choose what goes into *this* commit. On first load, a file is pre-checked if it is already staged.
-- **Commit & Push sequence:**
-  1. `git add -A -- <checked paths>`. `-A` makes deletions stage too. Renames include both old and new paths.
-  2. `git commit -m <msg> -- <checked paths>`. The pathspec limits the commit to exactly the checked files; anything else already staged stays staged.
-  3. `git pull --rebase --autostash`. `--autostash` is needed because unchecked changes would otherwise block the rebase.
-  4. `git push`
-- **No upstream:** skip the pull and run `git push -u origin HEAD` if an `origin` remote exists. Otherwise stop after the commit and say "committed locally, no remote".
-- **Rebase conflict:** run `git rebase --abort` so the repo is never left mid-rebase. Report "pulled changes conflict; your commit is saved locally, resolve in your editor".
-- **Unmerged files / rebase or merge in progress:** show a banner and disable the commit.
+- **Commit & Push sequence** (`src/git/commitPush.ts`):
+  1. **add:** `git add -- <checked untracked paths>`, and only those. `add -A` on a staged rename's old path or a staged deletion fails with "pathspec did not match".
+  2. **commit:** `git commit -m <msg> -- <checked paths, both sides of renames>`.
+     - This commits the working-tree state of exactly those paths: modifications, deletions and renames.
+     - Anything else already staged stays staged.
+  3. **pull:** `git fetch`, then if behind:
+     - stash tracked changes,
+     - `git rebase --no-autostash @{u}`,
+     - `git stash pop --index`.
+     - **Why not `git pull --rebase --autostash`:** it restores its stash without `--index`, so it silently unstages the user's other staged files, even when there's nothing to pull (found by the end-to-end tests).
+     - **If `pop --index` can't rebuild the index:** fall back to a plain pop, with a warning.
+     - **On a real conflict:** keep the stash and warn. Never discard anything.
+  4. **push:** `git push`.
+- **No upstream:** skip the pull and run `git push -u origin HEAD` if an `origin` remote exists. Otherwise stop after the commit and say "committed locally".
+- **Rebase conflict:** run `git rebase --abort` so the repo is never left mid-rebase, then restore the stash. Report that the commit is saved locally.
+- **After a failed pull or push:** the commit already exists, so the message is cleared to prevent a duplicate commit. It's kept only if nothing was committed.
+- **Unmerged files / rebase or merge in progress / detached HEAD:** show a banner and disable the commit.
+- **Known limit:** the pathspec must fit on one command line, about 30k characters or roughly 700 files. Past that, the app asks you to commit from a terminal.
+
+### Testing
+- **Unit tests:** pure logic over a scripted fake `GitRunner`.
+- **Live tests:** `src/test/nodeGit.ts` runs the real `git` in throwaway repos.
+- **End-to-end tests** (`commitPush.e2e.test.ts`): a local bare remote plus a "teammate" clone.
+  - Clones must set `core.autocrlf=false` at clone time, since your global `autocrlf=true` would make every file look modified.
+- **UI states:** `npm run dev`, then open `http://localhost:1420/preview.html?s=normal|claude|blocked|conflict|pushfail|clean|norepo`.
+  - This is the real App with Tauri IPC mocked (`src/dev/preview.tsx`). It's dev-only and not part of the build.
+- Don't drive the user's real desktop with synthetic mouse or keyboard input to test the tray app. Use the preview, read-only window queries, and logs.
 
 ### Security / capabilities
 - `src-tauri/capabilities/default.json` grants only what's needed:

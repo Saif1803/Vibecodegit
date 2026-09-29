@@ -5,6 +5,8 @@ import { EmptyState, FileList } from "./components/FileList";
 import { Header } from "./components/Header";
 import { AlertIcon, CheckCircleIcon, FolderPlusIcon, SpinnerIcon } from "./components/icons";
 import { StatusBar } from "./components/StatusBar";
+import { commitPush, pathspecFor, type CommitPushResult, type Step, type StepState } from "./git/commitPush";
+import { tauriGit } from "./git/runGit";
 import { commitBlocker } from "./git/status";
 import { useWindowBehavior } from "./hooks/useWindowBehavior";
 import { isClaudeActive } from "./state/claudeSessions";
@@ -14,27 +16,42 @@ import { useTheme } from "./theme";
 export default function App() {
   const visible = useWindowBehavior();
   const { pref, cycle } = useTheme();
-  const s = useRepoState(visible);
+  const [busy, setBusy] = useState(false);
+  const s = useRepoState(visible, busy);
   const [message, setMessage] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [steps, setSteps] = useState<Partial<Record<Step, StepState>>>({});
+  const [result, setResult] = useState<CommitPushResult | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
 
   const files = s.status?.files ?? [];
   const blocker = s.status ? commitBlocker(s.status) : null;
   const claudeActive = isClaudeActive(s.repo?.path ?? null, s.claude.repos);
-  const canCommit = !!s.status && !blocker && s.selected.size > 0 && message.trim().length > 0;
+  const canCommit = !busy && !!s.status && !blocker && s.selected.size > 0 && message.trim().length > 0;
 
-  const commit = () => {
+  const commit = async () => {
     setConfirming(false);
-    // Commit & Push lands in Phase 5.
+    if (!s.repo || !s.status) return;
+    setBusy(true);
+    setResult(null);
+    setSteps({});
+    const r = await commitPush(tauriGit, s.repo.path, pathspecFor(s.status.files, s.selected), message, (step, state) =>
+      setSteps((prev) => ({ ...prev, [step]: state })),
+    );
+    setResult(r);
+    // Keep the message only if nothing was committed; otherwise a retry would commit twice.
+    if (r.ok || r.hash) setMessage("");
+    setBusy(false);
+    // Even a failed pull or push leaves a local commit, so always re-read.
+    if (r.ok || r.hash) await s.afterCommit();
   };
 
   /** Button and Ctrl+Enter: ask first while Claude is editing this repo. */
   const requestCommit = () => {
-    if (confirming) return commit();
+    if (confirming) return void commit();
     if (!canCommit) return;
     if (claudeActive) setConfirming(true);
-    else commit();
+    else void commit();
   };
 
   // Ctrl+Enter from anywhere in the popup; Esc backs out of a confirmation before hiding.
@@ -60,7 +77,10 @@ export default function App() {
     if (visible) input.current?.focus();
     else setConfirming(false);
   }, [visible]);
-  useEffect(() => setConfirming(false), [s.repo?.path]);
+  useEffect(() => {
+    setConfirming(false);
+    setResult(null);
+  }, [s.repo?.path]);
 
   const empty = s.error ? (
     <EmptyState icon={<AlertIcon width={20} height={20} />} tone="error" title="Can't read this repository" detail={s.error} />
@@ -105,7 +125,19 @@ export default function App() {
       />
       <StatusBar branch={s.status?.branch ?? null} claudeActive={claudeActive} />
       <div className="h-1.5 shrink-0" />
-      {blocker && <Banner tone="warning">{blocker}</Banner>}
+      {result &&
+        (result.ok ? (
+          <Banner tone={result.warning ? "info" : "success"} onDismiss={() => setResult(null)}>
+            {`Committed ${result.hash}${result.pushedTo ? ` and pushed to ${result.pushedTo}` : " locally (no remote to push to)"}.`}
+            {result.warning ? `
+${result.warning}` : ""}
+          </Banner>
+        ) : (
+          <Banner tone="warning" onDismiss={() => setResult(null)}>
+            {`${result.step[0].toUpperCase()}${result.step.slice(1)} failed: ${result.message}`}
+          </Banner>
+        ))}
+      {blocker && !result && <Banner tone="warning">{blocker}</Banner>}
       {s.notice && (
         <Banner tone="info" onDismiss={s.dismissNotice}>
           {s.notice}
@@ -117,7 +149,8 @@ export default function App() {
         message={message}
         onMessage={setMessage}
         canCommit={canCommit}
-        busy={false}
+        busy={busy}
+        steps={steps}
         confirming={confirming}
         onCommit={requestCommit}
         onCancel={() => setConfirming(false)}

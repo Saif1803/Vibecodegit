@@ -13,7 +13,9 @@ export interface RepoStatus extends ParsedStatus {
   operation: Operation | null;
 }
 
-export const STATUS_ARGS = ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"];
+// --no-optional-locks: a background status must never hold index.lock while a commit
+// (ours, Claude's, or a terminal's) needs it.
+export const STATUS_ARGS = ["--no-optional-locks", "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"];
 
 // Checked in this order; a stopped rebase can also leave other markers behind.
 const OPERATION_REFS: [Operation, string][] = [

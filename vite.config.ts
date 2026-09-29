@@ -34,5 +34,7 @@ export default defineConfig(() => ({
   test: {
     include: ["src/**/*.test.ts"],
     passWithNoTests: true,
+    // End-to-end tests spawn dozens of git processes; slow on Windows.
+    testTimeout: 30_000,
   },
 }));
