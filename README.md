@@ -34,5 +34,6 @@ npm run tauri dev
 - **Typecheck:** `npm run typecheck`
 - **UI states in a browser:** with `npm run dev` running, open `http://localhost:1420/preview.html?s=claude`. Other states: `normal`, `blocked`, `conflict`, `pushfail`, `clean`, `norepo`.
 - **Installers:** `npm run tauri build` puts MSI and NSIS installers in `src-tauri/target/release/bundle/`.
+  - If the build fails with `timeout: global` while downloading NSIS (slow connection), run `powershell -ExecutionPolicy Bypass -File scripts/fetch-nsis.ps1` once, then `npm run tauri build -- --bundles nsis`.
 
 See [CLAUDE.md](CLAUDE.md) for the full spec, design tokens, and the reasoning behind the git flow.
