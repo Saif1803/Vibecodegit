@@ -72,3 +72,38 @@ describe("getStatus (live git)", () => {
     expect(s.files).toHaveLength(6);
   });
 });
+
+describe("in-progress operations (live git)", () => {
+  it("detects a conflicted merge, and nothing on a clean repo", async () => {
+    const repo = await makeRepo({ "both.txt": "base\n" });
+    expect((await getStatus(nodeGit, repo)).operation).toBeNull();
+
+    await sh(repo, "checkout", "-q", "-b", "other");
+    write(repo, "both.txt", "other\n");
+    await sh(repo, "commit", "-qam", "other");
+    await sh(repo, "checkout", "-q", "main");
+    write(repo, "both.txt", "main\n");
+    await sh(repo, "commit", "-qam", "main");
+    await nodeGit(repo, ["merge", "other"]); // exits 1 on conflict
+
+    const s = await getStatus(nodeGit, repo);
+    expect(s.operation).toBe("merge");
+    expect(s.files).toEqual([{ path: "both.txt", kind: "conflicted", staged: false }]);
+  });
+
+  it("detects a rebase stopped on a conflict", async () => {
+    const repo = await makeRepo({ "f.txt": "base\n" });
+    await sh(repo, "checkout", "-q", "-b", "topic");
+    write(repo, "f.txt", "topic\n");
+    await sh(repo, "commit", "-qam", "topic");
+    await sh(repo, "checkout", "-q", "main");
+    write(repo, "f.txt", "main\n");
+    await sh(repo, "commit", "-qam", "main");
+    await sh(repo, "checkout", "-q", "topic");
+    await nodeGit(repo, ["rebase", "main"]);
+
+    const s = await getStatus(nodeGit, repo);
+    expect(s.operation).toBe("rebase");
+    expect(s.branch.head).toBeNull();
+  });
+});

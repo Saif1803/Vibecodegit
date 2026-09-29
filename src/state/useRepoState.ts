@@ -1,4 +1,3 @@
-import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { resolveRepo, samePath } from "../git/repo";
 import { tauriGit, type GitRunner } from "../git/runGit";
@@ -23,8 +22,11 @@ export interface RepoState {
 }
 
 const EMPTY_CLAUDE: ClaudeRepos = { repos: [], nonRepos: [] };
+/** How often Claude activity is re-checked while the popup is visible. */
+export const CLAUDE_POLL_MS = 5_000;
 
-export function useRepoState(run: GitRunner = tauriGit) {
+/** All repo/Claude state for the popup. Refreshes on each show; polls Claude only while `visible`. */
+export function useRepoState(visible: boolean, run: GitRunner = tauriGit) {
   const [state, setState] = useState<RepoState>({
     repo: null,
     status: null,
@@ -41,7 +43,16 @@ export function useRepoState(run: GitRunner = tauriGit) {
   const lastAuto = useRef<string | null>(null);
   const request = useRef(0);
 
-  const patch = useCallback((p: Partial<RepoState>) => setState((s) => ({ ...s, ...p })), []);
+  // Notices the user closed stay closed (e.g. "Claude is in a non-repo folder" on every show).
+  const dismissed = useRef(new Set<string>());
+
+  const patch = useCallback((p: Partial<RepoState>) => {
+    if (p.notice && dismissed.current.has(p.notice)) {
+      const { notice: _, ...rest } = p;
+      p = rest;
+    }
+    setState((s) => ({ ...s, ...p }));
+  }, []);
 
   const loadStatus = useCallback(
     async (repo: RepoRef) => {
@@ -122,11 +133,37 @@ export function useRepoState(run: GitRunner = tauriGit) {
     [],
   );
 
-  const dismissNotice = useCallback(() => patch({ notice: null }), [patch]);
+  const dismissNotice = useCallback(() => {
+    if (latest.current.notice) dismissed.current.add(latest.current.notice);
+    patch({ notice: null });
+  }, [patch]);
 
+  // Claude activity only; the repo selection is left alone between shows.
+  const pollClaude = useCallback(async () => {
+    const sessions = await fetchSessions().catch(() => null);
+    if (sessions) patch({ claude: await claudeRepos(run, sessions) });
+  }, [run, patch]);
+
+  /** Refresh button: re-read the current repo and Claude activity, without auto-switching. */
+  const reload = useCallback(async () => {
+    const repo = latest.current.repo;
+    await Promise.all([pollClaude(), repo ? loadStatus(repo) : Promise.resolve()]);
+  }, [pollClaude, loadStatus]);
+
+  // Refresh on each show, then poll Claude activity until hidden.
+  const wasVisible = useRef(false);
+  useEffect(() => {
+    const shownNow = visible && !wasVisible.current;
+    wasVisible.current = visible;
+    if (!visible) return;
+    if (shownNow) void refresh();
+    const timer = window.setInterval(() => void pollClaude(), CLAUDE_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [visible, refresh, pollClaude]);
+
+  // Preload at launch so the first show is instant.
   useEffect(() => {
     let disposed = false;
-    const unlisten = listen("window-shown", () => void refresh());
     (async () => {
       // Once per launch: drop recent repos that were deleted or moved.
       const recent = await loadRecent().catch(() => []);
@@ -138,9 +175,8 @@ export function useRepoState(run: GitRunner = tauriGit) {
     })();
     return () => {
       disposed = true;
-      void unlisten.then((f) => f());
     };
   }, [run, refresh, patch]);
 
-  return { ...state, refresh, selectRepo, browse, toggle, toggleAll, dismissNotice };
+  return { ...state, refresh, reload, selectRepo, browse, toggle, toggleAll, dismissNotice };
 }

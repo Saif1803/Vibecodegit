@@ -1,13 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: git-only shell, folder picker, store, and show/hide/focus of itself.",
+  "description": "Main window: git-only shell, folder picker, and store. Window visibility is driven from Rust.",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:window:allow-show",
-    "core:window:allow-hide",
-    "core:window:allow-set-focus",
     {
       "identifier": "shell:allow-execute",
       "allow": [{ "name": "git", "cmd": "git", "args": true, "sidecar": false }]

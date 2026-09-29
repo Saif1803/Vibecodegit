@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { ChangeKind, FileChange } from "../git/types";
 import { Checkbox } from "./Checkbox";
 
@@ -15,9 +16,8 @@ interface Props {
   selected: Set<string>;
   onToggle: (path: string, checked: boolean) => void;
   onToggleAll: (checked: boolean) => void;
-  /** Replaces the list (loading, no repo, errors). */
-  placeholder?: string;
-  tone?: "muted" | "error";
+  /** Replaces the list (loading, no repo, errors, clean tree). */
+  empty?: ReactNode;
 }
 
 function split(path: string) {
@@ -25,7 +25,7 @@ function split(path: string) {
   return i < 0 ? { dir: "", name: path } : { dir: path.slice(0, i), name: path.slice(i + 1) };
 }
 
-export function FileList({ files, selected, onToggle, onToggleAll, placeholder, tone = "muted" }: Props) {
+export function FileList({ files, selected, onToggle, onToggleAll, empty }: Props) {
   const count = files.filter((f) => selected.has(f.path)).length;
   const all = files.length > 0 && count === files.length;
 
@@ -48,14 +48,8 @@ export function FileList({ files, selected, onToggle, onToggleAll, placeholder, 
         )}
       </header>
 
-      {placeholder !== undefined || files.length === 0 ? (
-        <div
-          className={`flex flex-1 items-center justify-center px-6 text-center break-words select-text ${
-            tone === "error" ? "text-st-deleted" : "text-fg-3"
-          }`}
-        >
-          {placeholder ?? "Working tree clean"}
-        </div>
+      {empty !== undefined ? (
+        empty
       ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto py-1">
           {files.map((f) => {
@@ -91,5 +85,29 @@ export function FileList({ files, selected, onToggle, onToggleAll, placeholder, 
         </ul>
       )}
     </section>
+  );
+}
+
+/** Centered icon + title + detail, for the list area when there's nothing to list. */
+export function EmptyState({
+  icon,
+  title,
+  detail,
+  tone = "muted",
+  action,
+}: {
+  icon: ReactNode;
+  title: string;
+  detail?: string;
+  tone?: "muted" | "error";
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-1.5 px-8 text-center">
+      <span className={tone === "error" ? "text-st-deleted" : "text-fg-3"}>{icon}</span>
+      <p className="font-medium text-fg-2">{title}</p>
+      {detail && <p className="text-[12px] break-words text-fg-3 select-text">{detail}</p>}
+      {action && <div className="mt-1.5">{action}</div>}
+    </div>
   );
 }

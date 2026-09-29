@@ -86,3 +86,37 @@ export const SpinnerIcon = (p: P) => (
     <path d="M8 2a6 6 0 1 1-6 6" />
   </Icon>
 );
+
+export const XIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />
+  </Icon>
+);
+
+export const InfoIcon = (p: P) => (
+  <Icon {...p}>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M8 7.25V11M8 5h.01" />
+  </Icon>
+);
+
+export const AlertIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M7.13 2.5a1 1 0 0 1 1.74 0l5.3 9.5a1 1 0 0 1-.87 1.5H2.7a1 1 0 0 1-.87-1.5z" />
+    <path d="M8 6.5v3M8 11.5h.01" />
+  </Icon>
+);
+
+export const RefreshIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+    <path d="M13.5 2.5v3h-3" />
+  </Icon>
+);
+
+export const CheckCircleIcon = (p: P) => (
+  <Icon {...p}>
+    <circle cx="8" cy="8" r="6" />
+    <path d="m5.5 8.25 1.75 1.75 3.25-3.5" />
+  </Icon>
+);

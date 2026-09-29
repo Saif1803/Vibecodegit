@@ -1,27 +1,93 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Banner } from "./components/Banner";
 import { CommitBox } from "./components/CommitBox";
-import { FileList } from "./components/FileList";
+import { EmptyState, FileList } from "./components/FileList";
 import { Header } from "./components/Header";
+import { AlertIcon, CheckCircleIcon, FolderPlusIcon, SpinnerIcon } from "./components/icons";
 import { StatusBar } from "./components/StatusBar";
+import { commitBlocker } from "./git/status";
 import { useWindowBehavior } from "./hooks/useWindowBehavior";
 import { isClaudeActive } from "./state/claudeSessions";
 import { useRepoState } from "./state/useRepoState";
 import { useTheme } from "./theme";
 
 export default function App() {
-  useWindowBehavior();
+  const visible = useWindowBehavior();
   const { pref, cycle } = useTheme();
-  const s = useRepoState();
+  const s = useRepoState(visible);
   const [message, setMessage] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const input = useRef<HTMLTextAreaElement>(null);
 
   const files = s.status?.files ?? [];
-  const placeholder = s.error
-    ? s.error
-    : !s.repo
-      ? "Choose a repository to get started"
-      : !s.status
-        ? "Loading…"
-        : undefined;
+  const blocker = s.status ? commitBlocker(s.status) : null;
+  const claudeActive = isClaudeActive(s.repo?.path ?? null, s.claude.repos);
+  const canCommit = !!s.status && !blocker && s.selected.size > 0 && message.trim().length > 0;
+
+  const commit = () => {
+    setConfirming(false);
+    // Commit & Push lands in Phase 5.
+  };
+
+  /** Button and Ctrl+Enter: ask first while Claude is editing this repo. */
+  const requestCommit = () => {
+    if (confirming) return commit();
+    if (!canCommit) return;
+    if (claudeActive) setConfirming(true);
+    else commit();
+  };
+
+  // Ctrl+Enter from anywhere in the popup; Esc backs out of a confirmation before hiding.
+  const keys = useRef({ requestCommit, confirming });
+  keys.current = { requestCommit, confirming };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && e.ctrlKey) {
+        e.preventDefault();
+        keys.current.requestCommit();
+      } else if (e.key === "Escape" && keys.current.confirming) {
+        e.preventDefault();
+        setConfirming(false);
+      }
+    };
+    // Capture phase: runs before the window-level Esc-to-hide handler.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  // Ready to type on show; a pending confirmation never survives a hide or repo switch.
+  useEffect(() => {
+    if (visible) input.current?.focus();
+    else setConfirming(false);
+  }, [visible]);
+  useEffect(() => setConfirming(false), [s.repo?.path]);
+
+  const empty = s.error ? (
+    <EmptyState icon={<AlertIcon width={20} height={20} />} tone="error" title="Can't read this repository" detail={s.error} />
+  ) : !s.repo ? (
+    s.loading ? (
+      <EmptyState icon={<SpinnerIcon width={18} height={18} />} title="Looking for Claude Code…" />
+    ) : (
+      <EmptyState
+        icon={<FolderPlusIcon width={20} height={20} />}
+        title="No repository selected"
+        detail="Start Claude Code in a repo, or open one here."
+        action={
+          <button
+            type="button"
+            onClick={() => void s.browse()}
+            className="h-8 rounded-lg border border-line px-3 text-fg-2 hover:bg-hover hover:text-fg"
+          >
+            Open folder…
+          </button>
+        }
+      />
+    )
+  ) : !s.status ? (
+    <EmptyState icon={<SpinnerIcon width={18} height={18} />} title="Loading changes…" />
+  ) : files.length === 0 ? (
+    <EmptyState icon={<CheckCircleIcon width={20} height={20} />} title="Working tree clean" detail="Nothing to commit." />
+  ) : undefined;
 
   return (
     <main className="flex h-full flex-col border border-line bg-bg">
@@ -34,33 +100,27 @@ export default function App() {
         onBrowse={() => void s.browse()}
         theme={pref}
         onCycleTheme={cycle}
+        onRefresh={() => void s.reload()}
+        refreshing={s.loading && !!s.status}
       />
-      <StatusBar branch={s.status?.branch ?? null} claudeActive={isClaudeActive(s.repo?.path ?? null, s.claude.repos)} />
+      <StatusBar branch={s.status?.branch ?? null} claudeActive={claudeActive} />
+      <div className="h-1.5 shrink-0" />
+      {blocker && <Banner tone="warning">{blocker}</Banner>}
       {s.notice && (
-        <div className="mx-3 mb-1 flex items-start gap-2 rounded-lg bg-chip px-3 py-1.5 text-[12px] text-fg-2">
-          <span className="min-w-0 flex-1 break-words">{s.notice}</span>
-          <button type="button" onClick={s.dismissNotice} className="shrink-0 text-fg-3 hover:text-fg" aria-label="Dismiss">
-            ✕
-          </button>
-        </div>
+        <Banner tone="info" onDismiss={s.dismissNotice}>
+          {s.notice}
+        </Banner>
       )}
-      <div className="h-1 shrink-0" />
-      <FileList
-        files={files}
-        selected={s.selected}
-        onToggle={s.toggle}
-        onToggleAll={s.toggleAll}
-        placeholder={placeholder}
-        tone={s.error ? "error" : "muted"}
-      />
+      <FileList files={files} selected={s.selected} onToggle={s.toggle} onToggleAll={s.toggleAll} empty={empty} />
       <CommitBox
+        inputRef={input}
         message={message}
         onMessage={setMessage}
-        canCommit={!!s.status && s.selected.size > 0 && message.trim().length > 0}
+        canCommit={canCommit}
         busy={false}
-        onCommit={() => {
-          // Commit & Push lands in Phase 5.
-        }}
+        confirming={confirming}
+        onCommit={requestCommit}
+        onCancel={() => setConfirming(false)}
       />
     </main>
   );

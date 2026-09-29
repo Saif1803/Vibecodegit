@@ -113,7 +113,14 @@ fn on_blur(app: &AppHandle) {
 fn hide(app: &AppHandle) {
     if let Some(window) = main_window(app) {
         let _ = window.hide();
+        let _ = app.emit_to(MAIN, "window-hidden", ());
     }
+}
+
+/// Esc from the webview. Routed through Rust so every hide path emits `window-hidden`.
+#[tauri::command]
+fn hide_window(app: AppHandle) {
+    hide(&app);
 }
 
 fn toggle(app: &AppHandle) {
@@ -172,7 +179,7 @@ pub fn run() {
                 .build(),
         )
         .manage(WindowState { blur_hide: AtomicBool::new(true), ..Default::default() })
-        .invoke_handler(tauri::generate_handler![set_blur_hide, detect_claude_sessions])
+        .invoke_handler(tauri::generate_handler![set_blur_hide, detect_claude_sessions, hide_window])
         .setup(|app| {
             let show_item = MenuItem::with_id(app, "show", "Show  (Ctrl+Shift+G)", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit ClaudeGit", true, None::<&str>)?;

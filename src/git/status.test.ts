@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseStatus } from "./status";
+import { commitBlocker, parseStatus, type RepoStatus } from "./status";
 
 const z = (...records: string[]) => records.join("\0") + "\0";
 const H = "4bcfe98e640c8284511312660fb8709b0afa888e";
@@ -68,5 +68,30 @@ describe("parseStatus", () => {
 
   it("returns an empty status for empty output", () => {
     expect(parseStatus("")).toEqual({ branch: { head: null, upstream: null, ahead: 0, behind: 0 }, files: [] });
+  });
+});
+
+describe("commitBlocker", () => {
+  const base: RepoStatus = {
+    branch: { head: "main", upstream: "origin/main", ahead: 0, behind: 0 },
+    files: [{ path: "a.ts", kind: "modified", staged: false }],
+    operation: null,
+  };
+  const conflicted = { path: "b.ts", kind: "conflicted" as const, staged: false };
+
+  it("allows a normal branch", () => {
+    expect(commitBlocker(base)).toBeNull();
+  });
+
+  it("blocks during an operation, mentioning conflicts", () => {
+    expect(commitBlocker({ ...base, operation: "merge", files: [conflicted] })).toBe(
+      "Merge in progress with conflicts. Finish or abort it in your editor first.",
+    );
+    expect(commitBlocker({ ...base, operation: "rebase" })).toMatch(/^Rebase in progress\./);
+  });
+
+  it("blocks on conflicts and on detached HEAD", () => {
+    expect(commitBlocker({ ...base, files: [conflicted] })).toMatch(/conflicted files/);
+    expect(commitBlocker({ ...base, branch: { ...base.branch, head: null } })).toMatch(/^Detached HEAD/);
   });
 });

@@ -1,15 +1,49 @@
 import { git, type GitRunner } from "./runGit";
 import type { BranchInfo, ChangeKind, FileChange } from "./types";
 
-export interface RepoStatus {
+export interface ParsedStatus {
   branch: BranchInfo;
   files: FileChange[];
 }
 
+export type Operation = "merge" | "rebase" | "cherry-pick" | "revert";
+
+export interface RepoStatus extends ParsedStatus {
+  /** A multi-step git operation stopped midway (usually on conflicts). */
+  operation: Operation | null;
+}
+
 export const STATUS_ARGS = ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"];
 
+// Checked in this order; a stopped rebase can also leave other markers behind.
+const OPERATION_REFS: [Operation, string][] = [
+  ["rebase", "REBASE_HEAD"],
+  ["merge", "MERGE_HEAD"],
+  ["cherry-pick", "CHERRY_PICK_HEAD"],
+  ["revert", "REVERT_HEAD"],
+];
+
+export async function inProgressOperation(run: GitRunner, repo: string): Promise<Operation | null> {
+  const results = await Promise.all(OPERATION_REFS.map(([, ref]) => run(repo, ["rev-parse", "-q", "--verify", ref])));
+  const i = results.findIndex((r) => r.code === 0);
+  return i < 0 ? null : OPERATION_REFS[i][0];
+}
+
 export async function getStatus(run: GitRunner, repo: string): Promise<RepoStatus> {
-  return parseStatus(await git(run, repo, STATUS_ARGS));
+  const [out, operation] = await Promise.all([git(run, repo, STATUS_ARGS), inProgressOperation(run, repo)]);
+  return { ...parseStatus(out), operation };
+}
+
+/** Why Commit & Push can't run in this state, or null if it can. */
+export function commitBlocker(status: RepoStatus): string | null {
+  const conflicts = status.files.some((f) => f.kind === "conflicted");
+  if (status.operation) {
+    const op = status.operation[0].toUpperCase() + status.operation.slice(1);
+    return `${op} in progress${conflicts ? " with conflicts" : ""}. Finish or abort it in your editor first.`;
+  }
+  if (conflicts) return "Resolve the conflicted files in your editor before committing.";
+  if (status.branch.head === null) return "Detached HEAD. Check out a branch to commit and push.";
+  return null;
 }
 
 /** Everything after the first `n` space-separated fields (paths may contain spaces). */
@@ -27,7 +61,7 @@ function kindOf(xy: string): ChangeKind {
 }
 
 /** Parses `git status --porcelain=v2 --branch -z` output. */
-export function parseStatus(out: string): RepoStatus {
+export function parseStatus(out: string): ParsedStatus {
   const branch: BranchInfo = { head: null, upstream: null, ahead: 0, behind: 0 };
   const files: FileChange[] = [];
   const records = out.split("\0");
