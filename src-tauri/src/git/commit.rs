@@ -4,8 +4,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::status::in_progress_operation;
 use super::sync::{pull_rebase, push, upstream_of, PullOutcome};
-use super::{git, Result};
+use super::{git, run, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -136,6 +137,24 @@ fn run_steps(
     Ok((to, warning))
 }
 
+/// Undo the last commit, keeping its changes staged (`reset --soft HEAD^`; a root commit
+/// leaves the branch unborn). Returns the commit's message so it can go back in the box.
+pub fn undo_last_commit(repo: &Path) -> Result<String> {
+    if let Some(op) = in_progress_operation(repo)? {
+        return Err(format!("Finish or abort the {} first.", op.label().to_lowercase()));
+    }
+    if !run(repo, &["rev-parse", "-q", "--verify", "HEAD"])?.ok() {
+        return Err("There's no commit to undo.".into());
+    }
+    let message = git(repo, &["log", "-1", "--format=%B", "HEAD", "--"])?.trim_end().to_owned();
+    if run(repo, &["rev-parse", "-q", "--verify", "HEAD^"])?.ok() {
+        git(repo, &["reset", "--soft", "-q", "HEAD^", "--"])?;
+    } else {
+        git(repo, &["update-ref", "-d", "HEAD"])?;
+    }
+    Ok(message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::ops::stage;
@@ -183,6 +202,37 @@ mod tests {
         let st = get_status(&r.me).unwrap().parsed;
         assert_eq!(paths(&st.unstaged), ["b.ts", "new.md"]);
         assert_eq!((st.branch.ahead, st.branch.behind), (0, 0));
+    }
+
+    #[test]
+    fn checkpoint_then_undo_brings_the_changes_back_staged() {
+        let repo = make_repo(&[("a.ts", "a\n")]);
+        write(&repo, "a.ts", "a2\n");
+        write(&repo, "new.ts", "n\n");
+        // A checkpoint is a local smart commit of everything, untracked files included.
+        let (res, _) = go(&repo, &CommitOptions { message: "Checkpoint 14:05".into(), stage_all: true, ..Default::default() });
+        assert!(res.ok && res.pushed_to.is_none());
+        assert_eq!(log(&repo, "HEAD"), ["Checkpoint 14:05", "init"]);
+
+        // Claude breaks something; discarding goes back to the checkpoint.
+        write(&repo, "a.ts", "broken\n");
+        sh(&repo, &["restore", "a.ts"]);
+        assert_eq!(read(&repo, "a.ts"), "a2\n");
+
+        assert_eq!(undo_last_commit(&repo).unwrap(), "Checkpoint 14:05");
+        assert_eq!(log(&repo, "HEAD"), ["init"]);
+        let st = get_status(&repo).unwrap().parsed;
+        assert_eq!(paths(&st.staged), ["a.ts", "new.ts"]);
+    }
+
+    #[test]
+    fn undo_the_first_commit_and_refuse_with_nothing_to_undo() {
+        let repo = make_repo(&[("a.ts", "a\n")]);
+        assert_eq!(undo_last_commit(&repo).unwrap(), "init");
+        let st = get_status(&repo).unwrap();
+        assert!(!st.parsed.branch.has_commits);
+        assert_eq!(paths(&st.parsed.staged), ["a.ts"]);
+        assert!(undo_last_commit(&repo).unwrap_err().contains("no commit"));
     }
 
     #[test]

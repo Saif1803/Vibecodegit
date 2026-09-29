@@ -241,6 +241,14 @@ pub fn run() {
             commands::reset_to,
             commands::file_timeline,
             commands::blame_file,
+            commands::apply_hunk,
+            commands::check_secrets,
+            commands::undo_last_commit,
+            commands::add_to_gitignore,
+            commands::claude_prompts,
+            commands::list_worktrees,
+            commands::add_worktree,
+            commands::remove_worktree,
         ])
         .setup(|app| {
             let show_item = MenuItem::with_id(app, "show", "Show  (Ctrl+Shift+G)", true, None::<&str>)?;

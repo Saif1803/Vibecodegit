@@ -1,13 +1,14 @@
 import { useState } from "react";
 import * as api from "../git/api";
-import type { Branch } from "../git/types";
+import type { Branch, RepoRef } from "../git/types";
 import { ago } from "../lib/time";
 import { ArrowUpIcon, BranchIcon, CheckIcon, CloudDownIcon, MergeIcon, MoreIcon, PencilIcon, PlusIcon, SyncIcon, TrashIcon } from "./icons";
 import { Badge, GroupHeader, ListState, Panel, Row, SearchInput, ToolbarButton, useList, type PanelOps } from "./ListParts";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
+import { promptAddWorktree, WorktreesSection } from "./Worktrees";
 
-/** Local branches, then each remote's branches, with VS Code's branch actions. */
-export function BranchesPanel({ ops }: { ops: PanelOps }) {
+/** Worktrees, local branches, then each remote's branches, with VS Code's branch actions. */
+export function BranchesPanel({ ops, onOpenRepo }: { ops: PanelOps; onOpenRepo: (r: RepoRef) => void }) {
   const { repo, busy, run, confirm, prompt, version } = ops;
   const branches = useList(() => api.listBranches(repo), [repo, version]);
   const remotes = useList(() => api.listRemotes(repo), [repo, version]);
@@ -174,6 +175,7 @@ export function BranchesPanel({ ops }: { ops: PanelOps }) {
       }
     >
       <ListState items={branches.items} error={branches.error} empty="No branches yet. Make a first commit." />
+      <WorktreesSection ops={ops} onOpenRepo={onOpenRepo} />
       {local.length > 0 && <GroupHeader>Local</GroupHeader>}
       {local.map(row)}
       {(remotes.items ?? []).map((rem) => {
@@ -232,6 +234,17 @@ export function BranchesPanel({ ops }: { ops: PanelOps }) {
         >
           <PlusIcon />
           Add remote…
+        </button>
+      )}
+      {branches.items && branches.items.length > 0 && (
+        <button
+          type="button"
+          onClick={() => promptAddWorktree(ops)}
+          disabled={busy}
+          className="mx-1 flex h-8 w-[calc(100%-8px)] items-center gap-2 rounded-lg px-2.5 text-fg-3 hover:bg-hover hover:text-fg disabled:opacity-40"
+        >
+          <PlusIcon />
+          Add worktree…
         </button>
       )}
     </Panel>

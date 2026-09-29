@@ -273,3 +273,38 @@ export const ResetIcon = (p: P) => (
     <path d="M13 8H6M9 5 6 8l3 3" />
   </Icon>
 );
+
+/** Add to .gitignore: an eye, crossed out. */
+export const IgnoreIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M2 8s2.25-4 6-4 6 4 6 4-2.25 4-6 4-6-4-6-4z" />
+    <circle cx="8" cy="8" r="1.75" />
+    <path d="M2.5 13.5 13.5 2.5" />
+  </Icon>
+);
+
+/** A speech bubble: suggestions from what you asked Claude. */
+export const PromptIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M2.5 4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 13.5 4v5.5A1.5 1.5 0 0 1 12 11H7l-3 2.5V11A1.5 1.5 0 0 1 2.5 9.5z" />
+    <path d="M5.5 6h5M5.5 8.25h3" />
+  </Icon>
+);
+
+export const FlagIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M3.5 14V2.5" />
+    <path d="M3.5 3h8l-1.75 2.75L11.5 8.5h-8" />
+  </Icon>
+);
+
+/** Worktree: a folder with a branch off it. */
+export const WorktreeIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.1l1.4 1.5h2" />
+    <path d="M2 4.5v7A1.5 1.5 0 0 0 3.5 13H7" />
+    <circle cx="11.5" cy="5" r="1.5" />
+    <circle cx="11.5" cy="12" r="1.5" />
+    <path d="M11.5 6.5v4" />
+  </Icon>
+);

@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { ChangeKind, ChangeSide, FileChange } from "../git/types";
-import { ChevronDownIcon, MinusIcon, PlusIcon, UndoIcon } from "./icons";
+import { ChevronDownIcon, IgnoreIcon, MinusIcon, PlusIcon, UndoIcon } from "./icons";
 
 const BADGE: Record<ChangeKind, { letter: string; className: string; label: string }> = {
   modified: { letter: "M", className: "text-st-modified", label: "Modified" },
@@ -16,6 +16,8 @@ export interface ChangeActions {
   stage: (files: FileChange[]) => void;
   unstage: (files: FileChange[]) => void;
   discard: (files: FileChange[]) => void;
+  /** Add an untracked file to .gitignore. */
+  ignore: (file: FileChange) => void;
 }
 
 interface Props extends ChangeActions {
@@ -81,6 +83,7 @@ export function ChangesList({ staged, unstaged, conflicted, active, disabled, em
                 { label: "Stage all", icon: <PlusIcon />, run: () => act.stage(unstaged) },
               ]}
               rowActions={(f) => [
+                ...(f.kind === "untracked" ? [{ label: "Add to .gitignore", icon: <IgnoreIcon />, run: () => act.ignore(f) }] : []),
                 { label: "Discard changes", icon: <UndoIcon />, run: () => act.discard([f]) },
                 { label: "Stage", icon: <PlusIcon />, run: () => act.stage([f]) },
               ]}

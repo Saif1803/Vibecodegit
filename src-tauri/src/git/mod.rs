@@ -8,11 +8,14 @@ pub mod commit;
 pub mod diff;
 pub mod history;
 pub mod ops;
+pub mod patch;
 pub mod repo;
+pub mod secrets;
 pub mod stash;
 pub mod status;
 pub mod sync;
 pub mod tags;
+pub mod worktrees;
 #[cfg(test)]
 pub mod testutil;
 

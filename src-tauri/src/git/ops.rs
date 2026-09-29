@@ -81,6 +81,40 @@ pub fn discard(repo: &Path, files: &[FileChange]) -> Result<()> {
     Ok(())
 }
 
+/// Ignore one untracked file: append it to the repo's root `.gitignore`, anchored (`/path`)
+/// with glob characters escaped so it matches only that file.
+pub fn add_to_gitignore(repo: &Path, path: &str) -> Result<()> {
+    let bad = path.is_empty() || path.starts_with('/') || path.contains(['\\', ':', '\n']) || path.split('/').any(|s| s == ".." || s.is_empty());
+    if bad {
+        return Err(format!("Can't ignore \"{path}\"."));
+    }
+    let mut pattern = String::from("/");
+    for c in path.chars() {
+        if matches!(c, '*' | '?' | '[' | '\\') {
+            pattern.push('\\');
+        }
+        pattern.push(c);
+    }
+    if pattern.ends_with(' ') {
+        pattern.pop();
+        pattern.push_str("\\ ");
+    }
+    let file = repo.join(".gitignore");
+    let existing = std::fs::read_to_string(&file).unwrap_or_default();
+    if existing.lines().any(|l| l.trim_end_matches('\r') == pattern) {
+        return Ok(());
+    }
+    let crlf = existing.contains("\r\n");
+    let nl = if crlf { "\r\n" } else { "\n" };
+    let mut text = existing;
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push_str(nl);
+    }
+    text.push_str(&pattern);
+    text.push_str(nl);
+    std::fs::write(&file, text).map_err(|e| format!("Couldn't write .gitignore: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::status::get_status;
@@ -151,6 +185,24 @@ mod tests {
         unstage_all(&repo).unwrap();
         assert_eq!(lists(&repo), (vec![], vec!["a.ts".into()]));
         assert_eq!(read(&repo, "a.ts"), "a2\n");
+    }
+
+    #[test]
+    fn ignores_exactly_one_file() {
+        let repo = make_repo(&[("a.ts", "a\n")]);
+        write(&repo, ".gitignore", "node_modules");
+        write(&repo, "[ab].ts", "x\n");
+        write(&repo, "b.ts", "b\n");
+        write(&repo, "logs/debug.log", "x\n");
+        add_to_gitignore(&repo, "[ab].ts").unwrap();
+        add_to_gitignore(&repo, "logs/debug.log").unwrap();
+        add_to_gitignore(&repo, "logs/debug.log").unwrap();
+        assert_eq!(read(&repo, ".gitignore"), "node_modules\n/\\[ab].ts\n/logs/debug.log\n");
+        // `[ab].ts` as a glob would also hide b.ts; escaped, only the literal file goes.
+        assert_eq!(lists(&repo).1, vec![".gitignore", "b.ts"]);
+        for bad in ["../x", "/abs", "C:/x", "a//b", ""] {
+            assert!(add_to_gitignore(&repo, bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

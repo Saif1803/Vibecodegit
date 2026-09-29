@@ -56,7 +56,7 @@ pub enum Operation {
 }
 
 impl Operation {
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Operation::Rebase => "Rebase",
             Operation::Merge => "Merge",

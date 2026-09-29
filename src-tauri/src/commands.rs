@@ -9,7 +9,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::claude;
 use crate::git::commit::{self, CommitOptions, CommitResult, Step, StepState};
-use crate::git::diff::{self, FileDiff, Side};
+use crate::git::diff::{self, FileDiff, Hunk, Side};
 use crate::git::history::{self, Blame, CommitDetail, History, ResetMode, TimelineEntry};
 use crate::git::repo::{self, ClaudeRepos, Resolved};
 use crate::git::status::{self, FileChange, RepoStatus};
@@ -17,6 +17,10 @@ use crate::git::branches::{self, Branch};
 use crate::git::stash::{self, StashEntry, StashMode};
 use crate::git::sync::{self, SyncKind, SyncResult};
 use crate::git::tags::{self, Remote, Tag};
+use crate::git::patch::{self, HunkAction};
+use crate::git::repo::RepoRef;
+use crate::git::secrets::{self, SecretFinding};
+use crate::git::worktrees::{self, Worktree};
 use crate::git::{ops, Outcome, Result};
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
@@ -290,4 +294,67 @@ pub async fn file_timeline(repo: PathBuf, path: String) -> Result<Vec<TimelineEn
 #[tauri::command]
 pub async fn blame_file(repo: PathBuf, path: String) -> Result<Blame> {
     blocking(move || history::blame_file(&repo, &path)).await
+}
+
+// ---- The Claude Code loop ----
+
+/// Stage / unstage / discard one hunk, or `lines` (indices into `hunk.lines`) of it.
+#[tauri::command]
+pub async fn apply_hunk(repo: PathBuf, file: FileChange, hunk: Hunk, lines: Option<Vec<usize>>, action: HunkAction) -> Result<()> {
+    blocking(move || patch::apply_hunk(&repo, &file, &hunk, lines.as_deref(), action)).await
+}
+
+/// Likely secrets in the next commit (the staged changes, or everything with `stage_all`).
+#[tauri::command]
+pub async fn check_secrets(repo: PathBuf, stage_all: bool) -> Result<Vec<SecretFinding>> {
+    blocking(move || secrets::check_secrets(&repo, stage_all)).await
+}
+
+/// Undo the last commit, keeping its changes staged; returns its message.
+#[tauri::command]
+pub async fn undo_last_commit(repo: PathBuf) -> Result<String> {
+    blocking(move || commit::undo_last_commit(&repo)).await
+}
+
+#[tauri::command]
+pub async fn add_to_gitignore(repo: PathBuf, path: String) -> Result<()> {
+    blocking(move || ops::add_to_gitignore(&repo, &path)).await
+}
+
+/// What you asked Claude Code in this repo since the last commit, newest first.
+#[tauri::command]
+pub async fn claude_prompts(app: AppHandle, repo: PathBuf) -> Result<Vec<claude::ClaudePrompt>> {
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    blocking(move || {
+        let last = crate::git::run(&repo, &["log", "-1", "--format=%ct", "HEAD", "--"])?;
+        let since_ms = if last.ok() { last.stdout.trim().parse::<u64>().unwrap_or(0) * 1000 } else { 0 };
+        let since = std::time::UNIX_EPOCH + std::time::Duration::from_millis(since_ms);
+        let here = repo.to_string_lossy();
+        let logs: Vec<PathBuf> = claude::recent_logs(&claude::projects_dir(&home), std::time::SystemTime::now(), claude::MAX_AGE)
+            .into_iter()
+            .filter(|(_, modified)| *modified >= since)
+            .filter_map(|(log, _)| {
+                let root = repo::resolve_cached(&claude::last_cwd(&log).ok()??)?;
+                repo::same_path(&root.path, &here).then_some(log)
+            })
+            .collect();
+        Ok(claude::prompts_since(&logs, since_ms, 8))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn list_worktrees(repo: PathBuf) -> Result<Vec<Worktree>> {
+    blocking(move || worktrees::list_worktrees(&repo)).await
+}
+
+/// Returns the new checkout, ready to open as the selected repo.
+#[tauri::command]
+pub async fn add_worktree(repo: PathBuf, path: String, branch: String, new_branch: bool) -> Result<RepoRef> {
+    blocking(move || worktrees::add_worktree(&repo, &path, &branch, new_branch)).await
+}
+
+#[tauri::command]
+pub async fn remove_worktree(repo: PathBuf, path: String, force: bool) -> Result<()> {
+    blocking(move || worktrees::remove_worktree(&repo, &path, force)).await
 }

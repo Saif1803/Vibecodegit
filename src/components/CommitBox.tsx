@@ -1,6 +1,8 @@
 import type { Ref } from "react";
-import type { Step, StepState } from "../git/types";
-import { ArrowUpIcon, CheckIcon, ChevronDownIcon, PencilIcon, SpinnerIcon } from "./icons";
+import type { ClaudePrompt, Step, StepState } from "../git/types";
+import { ago } from "../lib/time";
+import { promptToMessage } from "../state/prompts";
+import { ArrowUpIcon, CheckIcon, ChevronDownIcon, FlagIcon, PencilIcon, PromptIcon, SpinnerIcon, UndoIcon } from "./icons";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { StepProgress } from "./StepProgress";
 
@@ -25,6 +27,14 @@ interface Props {
   onCommit: () => void;
   onCancel: () => void;
   inputRef?: Ref<HTMLTextAreaElement>;
+  /** What you asked Claude here since the last commit, newest first: message suggestions. */
+  prompts: ClaudePrompt[];
+  /** Commit everything locally as a restore point (no push). */
+  onCheckpoint: () => void;
+  canCheckpoint: boolean;
+  /** Undo the last commit, keeping its changes staged. */
+  onUndo: () => void;
+  canUndo: boolean;
 }
 
 export function commitLabel(action: CommitAction, amend: boolean) {
@@ -39,6 +49,7 @@ export function commitLabel(action: CommitAction, amend: boolean) {
  */
 export function CommitBox(p: Props) {
   const label = commitLabel(p.action, p.amend);
+  const suggestion = p.prompts.length > 0 ? promptToMessage(p.prompts[0].text) : "";
   return (
     <div
       className={`m-3 rounded-2xl border bg-raised transition-colors ${
@@ -52,7 +63,16 @@ export function CommitBox(p: Props) {
         readOnly={p.busy}
         rows={2}
         spellCheck
-        placeholder={p.amend ? "New message (leave empty to keep the last one)" : "Commit message"}
+        onKeyDown={(e) => {
+          // Tab takes the newest suggestion while the box is empty, like accepting ghost text.
+          if (e.key === "Tab" && !e.shiftKey && !p.message && suggestion && !p.amend) {
+            e.preventDefault();
+            p.onMessage(suggestion);
+          }
+        }}
+        placeholder={
+          p.amend ? "New message (leave empty to keep the last one)" : suggestion ? `Commit message (Tab: “${suggestion}”)` : "Commit message"
+        }
         aria-label="Commit message"
         className="block w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-fg outline-none placeholder:text-fg-3 focus-visible:outline-none"
       />
@@ -78,6 +98,28 @@ export function CommitBox(p: Props) {
           </>
         ) : (
           <>
+            {!p.busy && p.prompts.length > 0 && (
+              <Menu
+                label="Use one of your Claude prompts"
+                placement="above"
+                align="left"
+                trigger={<PromptIcon />}
+                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-fg-3 hover:bg-hover hover:text-fg"
+              >
+                {(close) => (
+                  <>
+                    <p className="px-2 pt-1 pb-1.5 text-[11px] text-fg-3">Your prompts since the last commit</p>
+                    {p.prompts.map((pr) => (
+                      <MenuItem key={pr.atMs} hint={ago(pr.atMs)} onClick={() => (p.onMessage(promptToMessage(pr.text)), close())}>
+                        <span className="block max-w-[260px] truncate" title={pr.text}>
+                          {promptToMessage(pr.text)}
+                        </span>
+                      </MenuItem>
+                    ))}
+                  </>
+                )}
+              </Menu>
+            )}
             {p.busy ? (
               <StepProgress order={p.stepOrder} steps={p.steps} />
             ) : (
@@ -121,6 +163,13 @@ export function CommitBox(p: Props) {
                     <MenuSeparator />
                     <MenuItem checked={p.amend} onClick={() => (p.onAmend(!p.amend), close())}>
                       Amend last commit
+                    </MenuItem>
+                    <MenuSeparator />
+                    <MenuItem icon={<FlagIcon />} hint="local" disabled={!p.canCheckpoint} onClick={() => (close(), p.onCheckpoint())}>
+                      Checkpoint everything
+                    </MenuItem>
+                    <MenuItem icon={<UndoIcon />} disabled={!p.canUndo} onClick={() => (close(), p.onUndo())}>
+                      Undo last commit
                     </MenuItem>
                   </>
                 )}

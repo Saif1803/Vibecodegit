@@ -19,8 +19,22 @@ import { StatusBar } from "./components/StatusBar";
 import { Tabs, type TabId } from "./components/Tabs";
 import { TagsPanel } from "./components/TagsPanel";
 import * as api from "./git/api";
-import type { ChangeSide, CommitResult, FileChange, FileDiff, Outcome, StashEntry, Step, StepState, SyncKind } from "./git/types";
+import type {
+  ChangeSide,
+  ClaudePrompt,
+  CommitResult,
+  FileChange,
+  FileDiff,
+  Hunk,
+  HunkAction,
+  Outcome,
+  StashEntry,
+  Step,
+  StepState,
+  SyncKind,
+} from "./git/types";
 import { setExpanded, useWindowBehavior } from "./hooks/useWindowBehavior";
+import { samePath } from "./git/repo";
 import { isClaudeActive } from "./state/claudeSessions";
 import { useRepoState } from "./state/useRepoState";
 import { useTheme } from "./theme";
@@ -67,6 +81,7 @@ export default function App() {
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   const [promptReq, setPromptReq] = useState<PromptRequest | null>(null);
   const [tab, setTab] = useState<TabId>("changes");
+  const [prompts, setPrompts] = useState<ClaudePrompt[]>([]);
   const input = useRef<HTMLTextAreaElement>(null);
 
   const repo = s.repo?.path ?? null;
@@ -192,27 +207,32 @@ export default function App() {
     });
   };
 
-  const runCommit = async (forcePush: boolean) => {
+  /** What one commit run does. A checkpoint keeps whatever message you were writing. */
+  type CommitPlan = { message: string; amend: boolean; stageAll: boolean; push: boolean; forcePush: boolean; checkpoint?: boolean };
+
+  const runCommit = async (plan: CommitPlan) => {
     if (!repo) return;
-    const push = action === "commit-push";
+    const { push } = plan;
     setBusy(true);
     setCommitting(true);
     setNotice(null);
     setSteps({});
-    setStepOrder((["stage", "commit", "pull", "push"] as Step[]).filter((x) => (x === "stage" ? stageAll : x === "commit" || push)));
+    setStepOrder((["stage", "commit", "pull", "push"] as Step[]).filter((x) => (x === "stage" ? plan.stageAll : x === "commit" || push)));
     const r: CommitResult = await api
-      .commitPush(repo, { message, amend, stageAll, push, forcePush }, (step, state) => setSteps((prev) => ({ ...prev, [step]: state })))
+      .commitPush(repo, plan, (step, state) => setSteps((prev) => ({ ...prev, [step]: state })))
       .catch((e) => ({ ok: false as const, step: "commit" as const, message: api.errorText(e), hash: null }));
 
-    if (r.ok) {
-      const verb = amend ? "Amended" : "Committed";
+    if (r.ok && plan.checkpoint) {
+      setNotice({ tone: "success", text: `Checkpoint ${r.hash} saved locally. Discard back to it if Claude's next change goes wrong; Undo last commit turns it back into changes.` });
+    } else if (r.ok) {
+      const verb = plan.amend ? "Amended" : "Committed";
       const where = !push ? "" : r.pushedTo ? ` and pushed to ${r.pushedTo}` : " locally (no remote to push to)";
       setNotice({ tone: r.warning ? "info" : "success", text: `${verb} ${r.hash}${where}.${r.warning ? `\n${r.warning}` : ""}` });
     } else {
       setNotice({ tone: "warning", text: `${r.step[0].toUpperCase()}${r.step.slice(1)} failed: ${r.message}` });
     }
     // Keep the message only if nothing was committed; otherwise a retry would commit twice.
-    if (r.ok || r.hash) {
+    if ((r.ok || r.hash) && !plan.checkpoint) {
       setMessage("");
       setAmend(false);
     }
@@ -222,13 +242,29 @@ export default function App() {
     if (r.ok || r.hash) await s.afterCommit();
   };
 
+  /** Look for keys, tokens and .env files in what's about to be committed; warn, never block. */
+  const withSecretsCheck = async (everything: boolean, next: () => void) => {
+    if (!repo) return;
+    const found = await api.checkSecrets(repo, everything).catch(() => []);
+    if (found.length === 0) return next();
+    setConfirmReq({
+      title: found.length === 1 ? "This commit may contain a secret" : `This commit may contain ${found.length} secrets`,
+      body: "Once pushed, a secret should be treated as leaked (rotate it; deleting it later isn't enough). Unstage or ignore these, or commit anyway if they're safe.",
+      items: found.map((f) => `${f.what} · ${f.path}${f.line ? `:${f.line}` : ""}`),
+      confirmLabel: "Commit anyway",
+      danger: true,
+      onConfirm: next,
+    });
+  };
+
   const commit = async () => {
     setConfirming(false);
     if (!repo) return;
+    const push = action === "commit-push";
+    const plan: CommitPlan = { message, amend, stageAll, push, forcePush: false };
     // Rewriting a commit that's already on the remote needs a force push; say so first.
     const published = amend && (await api.isHeadPublished(repo).catch(() => false));
-    if (!published) return void runCommit(false);
-    const push = action === "commit-push";
+    if (!published) return void withSecretsCheck(stageAll, () => void runCommit(plan));
     setConfirmReq({
       title: "Amend a pushed commit?",
       body: push
@@ -236,9 +272,58 @@ export default function App() {
         : `The last commit is already on ${st?.branch.upstream}. After amending, your next push will need to force (rewriting shared history).`,
       confirmLabel: push ? "Amend & force push" : "Amend",
       danger: true,
-      onConfirm: () => void runCommit(push),
+      onConfirm: () => void withSecretsCheck(false, () => void runCommit({ ...plan, forcePush: push })),
     });
   };
+
+  /** A local restore point of everything, before letting Claude try something risky. */
+  const checkpoint = () => {
+    const time = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    const plan: CommitPlan = { message: `Checkpoint ${time}`, amend: false, stageAll: true, push: false, forcePush: false, checkpoint: true };
+    void withSecretsCheck(true, () => void runCommit(plan));
+  };
+
+  /** Undo the last commit: its changes go back to staged, its message back into the box. */
+  const undoLastCommit = async () => {
+    if (!repo) return;
+    const undo = async () => {
+      let undone = "";
+      setBusy(true);
+      setNotice(null);
+      const failure = await s.mutate(async (r) => {
+        undone = await api.undoLastCommit(r);
+      });
+      setBusy(false);
+      if (failure) return setNotice({ tone: "warning", text: failure });
+      const subject = undone.split("\n")[0];
+      // A checkpoint's name isn't a message worth keeping.
+      if (!message.trim() && !subject.startsWith("Checkpoint ")) setMessage(undone);
+      setNotice({ tone: "success", text: `Undid “${subject}”. Its changes are staged.` });
+    };
+    if (!(await api.isHeadPublished(repo).catch(() => false))) return void undo();
+    setConfirmReq({
+      title: "Undo a pushed commit?",
+      body: `The last commit is already on ${st?.branch.upstream}. Undoing it locally means your next push has to force, rewriting history for anyone who pulled it.`,
+      confirmLabel: "Undo commit",
+      danger: true,
+      onConfirm: () => void undo(),
+    });
+  };
+
+  /** Hunk / line staging from the diff pane. Discarding asks first. */
+  const applyHunk = (file: FileChange, hunk: Hunk, lines: number[] | null, action: HunkAction) => {
+    const go = () => void op((r) => api.applyHunk(r, file, hunk, lines, action));
+    if (action !== "discard") return go();
+    setConfirmReq({
+      title: lines ? `Discard ${plural(lines.length, "line")} in ${baseName(file.path)}?` : `Discard this change in ${baseName(file.path)}?`,
+      body: "This can't be undone. The lines go back to their staged or committed version.",
+      confirmLabel: "Discard",
+      danger: true,
+      onConfirm: go,
+    });
+  };
+
+  const ignore = (file: FileChange) => void run((r) => api.addToGitignore(r, file.path), `Added /${file.path} to .gitignore.`);
 
   /** Button and Ctrl+Enter: ask first while Claude is editing this repo. */
   const requestCommit = () => {
@@ -334,6 +419,21 @@ export default function App() {
     setAmend(false);
   }, [repo]);
 
+  // Your Claude prompts since the last commit: re-read after each status load (a commit moves
+  // "since") and whenever Claude's session log for this repo is written.
+  const claudeWrote = s.claude.repos.find((r) => repo && samePath(r.path, repo))?.lastActiveMs ?? 0;
+  useEffect(() => {
+    if (!repo || !visible) return;
+    let stale = false;
+    api
+      .claudePrompts(repo)
+      .then((p) => !stale && setPrompts(p))
+      .catch(() => !stale && setPrompts([]));
+    return () => {
+      stale = true;
+    };
+  }, [repo, st, claudeWrote, visible]);
+
   const total = staged.length + unstaged.length + conflicted.length;
   const empty = s.error ? (
     <EmptyState icon={<AlertIcon width={20} height={20} />} tone="error" title="Can't read this repository" detail={s.error} />
@@ -425,8 +525,14 @@ export default function App() {
               stage={stage}
               unstage={unstage}
               discard={discard}
+              ignore={ignore}
             />
             <CommitBox
+              prompts={prompts}
+              onCheckpoint={checkpoint}
+              canCheckpoint={!busy && !!st && !blocker && total > 0}
+              onUndo={() => void undoLastCommit()}
+              canUndo={!busy && hasCommits && !st?.operation}
               inputRef={input}
               message={message}
               onMessage={setMessage}
@@ -447,7 +553,7 @@ export default function App() {
         ) : tab === "history" ? (
           <HistoryPanel ops={panelOps} actions={commitActions} openHash={detail?.kind === "commit" ? detail.commit.hash : null} />
         ) : tab === "branches" ? (
-          <BranchesPanel ops={panelOps} />
+          <BranchesPanel ops={panelOps} onOpenRepo={(r) => void s.selectRepo(r)} />
         ) : tab === "tags" ? (
           <TagsPanel ops={panelOps} />
         ) : (
@@ -472,6 +578,8 @@ export default function App() {
           onDiscard={() => discard([detail.file])}
           onTimeline={() => pushDetail({ kind: "timeline", path: detail.file.path })}
           onBlame={() => pushDetail({ kind: "blame", path: detail.file.path })}
+          onIgnore={() => ignore(detail.file)}
+          onHunk={(hunk, lines, action) => applyHunk(detail.file, hunk, lines, action)}
         />
       )}
       {detail?.kind === "stash" && repo && (

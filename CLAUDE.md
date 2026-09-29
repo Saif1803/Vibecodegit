@@ -132,8 +132,8 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
   - End-to-end cases use a local bare remote plus a "teammate" clone (`with_remote`).
   - Clones must set `core.autocrlf=false` at clone time, since your global `autocrlf=true` would make every file look modified.
   - Test file names must be valid on Windows (no `*`, `?`, `:`).
-- **Vitest (`npm test`):** UI-side logic only: path compare, MRU, auto-select, Claude-active window, graph width.
-- **UI states:** `npm run dev`, then open `http://localhost:1420/preview.html?s=normal|claude|blocked|conflict|pushfail|clean|norepo|unborn|ahead`.
+- **Vitest (`npm test`):** UI-side logic only: path compare, MRU, auto-select, Claude-active window, graph width, prompt → commit message.
+- **UI states:** `npm run dev`, then open `http://localhost:1420/preview.html?s=normal|claude|blocked|conflict|pushfail|clean|norepo|unborn|ahead|secrets`.
   - This is the real App with the Rust commands mocked by an in-memory fake repo (`src/dev/preview.tsx`). It's dev-only and not part of the build.
   - Emulate 380×500 for compact and 960×640 for the diff pane.
 - Don't drive the user's real desktop with synthetic mouse or keyboard input to test the tray app. Use the preview, read-only window queries, and logs.
@@ -159,7 +159,9 @@ src/
   components/RepoPicker.tsx, ChangesList.tsx, CommitBox.tsx, DiffView.tsx, ConfirmDialog.tsx, PromptDialog.tsx, Menu.tsx
   components/Tabs.tsx, ListParts.tsx, BranchesPanel.tsx, TagsPanel.tsx, StashesPanel.tsx, StashView.tsx
   components/HistoryPanel.tsx, CommitGraph.tsx, commitActions.tsx, CommitView.tsx, FileHistoryViews.tsx, FileListDiff.tsx
+  components/Worktrees.tsx
   state/recentRepos.ts                   # plugin-store MRU
+  state/prompts.ts                       # a Claude prompt -> commit message suggestion
   state/claudeSessions.ts                # auto-select rule, Claude-active window
   state/pickFolder.ts                    # dialog + set_blur_hide pause
   state/useRepoState.ts                  # the app's data hook; refreshes on `window-shown`
@@ -170,10 +172,13 @@ src-tauri/
   src/commands.rs                        # the Tauri commands the webview may call
   src/git/mod.rs                         # the git runner (argv only, stdin pathspecs, no console window)
   src/git/status.rs, ops.rs, diff.rs, sync.rs, commit.rs, repo.rs, branches.rs, stash.rs, tags.rs (+ remotes), history.rs
+  src/git/patch.rs                       # hunk / line patches for partial staging (git apply on stdin)
+  src/git/secrets.rs                     # pre-commit secrets check (hand-written matchers)
+  src/git/worktrees.rs
   src/git/testutil.rs                    # throwaway repos + bare remotes for tests
   src/placement.rs                       # pure placement math (unit-tested)
   src/taskbar.rs                         # Windows taskbar rect via SHAppBarMessage
-  src/claude.rs                          # read-only scan of ~/.claude/projects
+  src/claude.rs                          # read-only scan of ~/.claude/projects (sessions, your prompts)
   capabilities/default.json
   tauri.conf.json
 ```
@@ -191,7 +196,7 @@ src-tauri/
 - TS types in `src/git/types.ts` mirror the serde types; change both together.
 - No new dependencies beyond the stack above without asking.
 
-## Plan (10 phases; stop for review after each. Phases 1–8 are done.)
+## Plan (10 phases; stop for review after each. Phases 1–9 are done.)
 
 ### Phase 1: Scaffold and lockdown
 - `create-tauri-app` (React + TS + Vite), Tailwind v4 wired in, Vitest set up.
@@ -234,7 +239,7 @@ src-tauri/
 - **Out of scope:**
   - GitHub pull requests and issues. These need `gh` or the GitHub API, and git stays the only external program.
   - Other version control systems (SVN, Mercurial).
-  - A full 3-way merge editor. Per-conflict-block resolution in the diff pane replaces it (Phase 9).
+  - A full 3-way merge editor. Per-conflict-block resolution in the diff pane may replace it later.
 
 ### Phase 6: Rust git layer, staging model, diffs, expanded window, sync actions
 - All git logic moved from TS to Rust (`src-tauri/src/git/`) behind named commands. The shell plugin is removed.
@@ -252,7 +257,7 @@ src-tauri/
   - Delete is confirmed, and `-D` needs a second confirmation after git says "not fully merged". Delete-from-remote is confirmed too.
   - Names are checked with `check-ref-format` first.
   - Remotes live here as group headers: fetch one, remove (confirm), and "Add remote…" (names/URLs starting with `-` are refused).
-- A merge that stops on conflicts stays in progress. The blocker banner gets an **Abort** button (`abort_operation`, confirmed) until Phase 9 adds full resolution.
+- A merge that stops on conflicts stays in progress. The blocker banner gets an **Abort** button (`abort_operation`, confirmed); full resolution is under **Later**.
 - Stashes (`git/stash.rs`, `StashesPanel`, `StashView`): message + split button (Stash / include untracked / staged only), and a list.
   - Clicking a stash opens its files and diffs in the expanded pane. Apply and pop use `--index`, falling back to a plain apply with a warning.
   - A conflicting pop keeps the stash. Drop and drop-all are confirmed.
@@ -278,15 +283,22 @@ src-tauri/
 - File timeline (`log --follow`, with each commit's diff of the file at its path then) and blame (`blame --porcelain` of the working file, uncommitted lines marked) open from a file's diff pane.
 - **Done when:** the graph layout and blame parser are unit-tested, and the actions have live-git tests.
 
-### Phase 9: Conflicts, partial staging, worktrees, repo setup
-- Conflicts: a Merge Changes view with per-block **Accept Current / Incoming / Both** in the diff pane. Mark resolved (stage it). **Continue / Abort** for merge, rebase, cherry-pick and revert, which replaces the "finish in your editor" banner.
-  - Writing a resolved file is a small Rust command scoped to paths inside the selected repo.
-- Partial staging: stage, unstage or discard a hunk or a selection of lines from the diff pane.
-  - Uses `git apply --cached [--reverse]` with the patch on stdin (`run_with_input`), built in Rust from the parsed hunks.
-- Worktrees: list, add (new or existing branch), remove (confirm), and open a worktree as the selected repo.
-- Repo setup: **Init** a non-repo folder, **Clone** a URL into a picked folder (with progress), and **Add to .gitignore** from a file's menu.
-- A pre-commit **secrets check** on staged files (`.env*`, key/token patterns). It warns, it never blocks.
-- **Done when:** the patch builder and conflict-block parser are unit-tested, and the flows have live-git tests.
+### Phase 9: The Claude Code loop (review, partial commits, safety nets)
+Re-scoped for committing Claude's work: keep the good parts of an edit, don't leak secrets, make mistakes cheap to undo. Conflict resolution and repo setup move to **Later**.
+- **Partial staging:** stage, unstage or discard one hunk, or selected lines, from the diff pane.
+  - Rust builds a patch from the parsed hunks and runs `git apply --cached [--reverse]` (discard: `git apply --reverse` on the working tree) with the patch on stdin (`run_with_input`). The patch is checked against the current diff first, so a file Claude just changed again isn't patched blind.
+  - Discarding a hunk is confirmed. Untracked files stage whole.
+- **Commit message from Claude:** your Claude Code prompts in this repo since the last commit (read-only, from the session logs `claude_repos` already scans), offered as picks in the commit box. Tab fills the newest when the message is empty. Prompts are conversational, so they're suggestions to edit, never auto-filled.
+- **Secrets check before committing:** file names (`.env*` but not `.env.example`, `*.pem`, `*.key`, `id_rsa*`, …) and added lines (private keys, AWS/GitHub/Slack/Stripe/Google/Anthropic/OpenAI tokens, `password = "…"`) in what's about to be committed. It warns with the findings and "Commit anyway"; it never blocks. Hand-written matchers, no regex crate.
+- **Undo last commit:** in the commit menu. `reset --soft HEAD~1` (a root commit drops HEAD), the changes stay staged and the message comes back into the box. Confirmed when the commit is already pushed.
+- **Checkpoint:** in the commit menu. Stages everything and commits locally as "Checkpoint: <time>" with no push, so a bad Claude run can be discarded back to it. Undo last commit turns it back into changes.
+- **Worktrees:** listed in the Branches tab (Claude Code runs sessions in them). Open one as the selected repo, add (new or existing branch), remove (confirmed; force only after a second confirm).
+- **Add to .gitignore** from a changed file's row (for scratch files Claude leaves behind).
+- **Done when:** the patch builder, the secrets matchers and the prompt reader are unit-tested, and partial staging, undo, checkpoint and worktrees have live-git tests.
+
+### Later (not scheduled)
+- Conflicts: per-block **Accept Current / Incoming / Both** in the diff pane, and **Continue** for merge/rebase/cherry-pick/revert. Until then, Abort from the banner, or ask Claude to resolve.
+- Repo setup: **Init** a folder and **Clone** a URL.
 
 ### Phase 10: Polish and release
 - Keyboard navigation for lists and menus, empty/loading/error states for every tab, and a preview scenario per tab.

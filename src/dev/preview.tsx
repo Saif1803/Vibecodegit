@@ -1,6 +1,6 @@
 // Dev-only design preview: renders the real App in a plain browser with the Rust commands mocked
 // by an in-memory fake repo. Open /preview.html?s=<scenario> on the Vite dev server.
-// Scenarios: normal | claude | blocked | conflict | pushfail | clean | norepo | unborn | ahead
+// Scenarios: normal | claude | blocked | conflict | pushfail | clean | norepo | unborn | ahead | secrets
 import { emit } from "@tauri-apps/api/event";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import React from "react";
@@ -27,6 +27,7 @@ let unstaged: FileChange[] = [
 let conflicted: FileChange[] = [];
 if (scenario === "clean") (staged = []), (unstaged = []);
 if (scenario === "blocked") conflicted = [{ path: "src/App.tsx", kind: "conflicted" }];
+if (scenario === "secrets") unstaged = [...unstaged, { path: ".env", kind: "untracked" }];
 let ahead = scenario === "ahead" ? 2 : 0;
 const behind = scenario === "ahead" ? 1 : 0;
 
@@ -390,12 +391,58 @@ function historyCmd(cmd: string, p: Record<string, unknown>) {
   }
 }
 
+// ---- The Claude Code loop ----
+const MINUTE = 60_000;
+function loopCmd(cmd: string, p: Record<string, unknown>) {
+  switch (cmd) {
+    case "apply_hunk": {
+      const file = p.file as FileChange;
+      if (p.action === "stage") staged = addTo(staged, [file]);
+      if (p.action === "unstage") unstaged = addTo(unstaged, [file]);
+      return null;
+    }
+    case "check_secrets": {
+      const everything = p.stageAll ? [...staged, ...unstaged] : staged;
+      const findings = [];
+      if (everything.some((f) => f.path === ".env")) findings.push({ path: ".env", line: null, what: "Environment file", preview: "" });
+      if (scenario === "secrets")
+        findings.push({ path: "src/App.tsx", line: 42, what: "Anthropic API key", preview: "sk-ant… (108 chars)" });
+      return findings;
+    }
+    case "undo_last_commit":
+      staged = addTo(staged, [{ path: "src/components/HistoryPanel.tsx", kind: "added" }]);
+      return "Add the history tab\n\nLanes are laid out in Rust.";
+    case "add_to_gitignore":
+      unstaged = unstaged.filter((f) => f.path !== p.path);
+      return null;
+    case "claude_prompts":
+      return scenario === "norepo" || scenario === "clean"
+        ? []
+        : [
+            { text: "can you make the tray icon stop flickering when the laptop wakes up?", atMs: Date.now() - 4 * MINUTE },
+            { text: "add a dark mode toggle to the header\nit should follow the OS by default", atMs: Date.now() - 25 * MINUTE },
+            { text: "please split App.tsx into smaller components", atMs: Date.now() - 70 * MINUTE },
+          ];
+    case "list_worktrees":
+      return [
+        { path: ROOT, branch: current, head: "3f9c2ab", main: true, current: true, locked: false, prunable: false },
+        { path: `${ROOT}-dark-mode`, branch: "feature/dark-mode", head: "91be0c4", main: false, current: false, locked: false, prunable: false },
+      ];
+    case "add_worktree":
+      return { path: `${ROOT}-${String(p.branch).replace(/\//g, "-")}`, name: `ClaudeGit-${String(p.branch).replace(/\//g, "-")}` };
+    case "remove_worktree":
+      return null;
+    default:
+      return undefined;
+  }
+}
+
 mockWindows("main");
 mockIPC(
   async (cmd, payload) => {
     const p = (payload ?? {}) as Record<string, unknown>;
     const files = (p.files ?? []) as FileChange[];
-    const other = branchCmd(cmd, p) ?? historyCmd(cmd, p);
+    const other = branchCmd(cmd, p) ?? historyCmd(cmd, p) ?? loopCmd(cmd, p);
     if (other !== undefined) return other;
     switch (cmd) {
       case "claude_repos":

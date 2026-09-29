@@ -262,3 +262,34 @@ export interface Blame {
   lines: BlameLine[];
   truncated: boolean;
 }
+
+// ---- The Claude Code loop ----
+
+export type HunkAction = "stage" | "unstage" | "discard";
+
+export interface SecretFinding {
+  path: string;
+  /** Line in the new file; null for a file-name match (".env"). */
+  line: number | null;
+  what: string;
+  /** The start of the match, the rest masked. */
+  preview: string;
+}
+
+/** Something you asked Claude Code in this repo since the last commit. */
+export interface ClaudePrompt {
+  text: string;
+  atMs: number;
+}
+
+export interface Worktree {
+  path: string;
+  /** null when detached. */
+  branch: string | null;
+  head: string;
+  main: boolean;
+  /** The selected repo is this worktree. */
+  current: boolean;
+  locked: boolean;
+  prunable: boolean;
+}

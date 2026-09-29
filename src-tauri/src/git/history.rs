@@ -242,7 +242,7 @@ fn check_hash(hash: &str) -> Result<()> {
 }
 
 /// The empty tree's id in this repo's hash format: the "parent" of a root commit.
-fn empty_tree(repo: &Path) -> Result<String> {
+pub(crate) fn empty_tree(repo: &Path) -> Result<String> {
     let out = run_with_input(repo, &["hash-object", "-t", "tree", "--stdin"], Some(Vec::new()))?;
     if out.ok() {
         Ok(out.stdout.trim().to_owned())

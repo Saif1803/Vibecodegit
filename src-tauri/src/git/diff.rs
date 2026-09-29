@@ -19,7 +19,7 @@ pub enum Side {
     Conflicted,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LineKind {
     Context,
@@ -29,7 +29,7 @@ pub enum LineKind {
     Note,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiffLine {
     pub kind: LineKind,
     pub text: String,
@@ -38,7 +38,7 @@ pub struct DiffLine {
     pub new: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Hunk {
     pub header: String,

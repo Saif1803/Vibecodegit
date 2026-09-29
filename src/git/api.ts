@@ -3,6 +3,7 @@ import type {
   Blame,
   Branch,
   ChangeSide,
+  ClaudePrompt,
   ClaudeRepos,
   CommitDetail,
   CommitOptions,
@@ -10,10 +11,14 @@ import type {
   FileChange,
   FileDiff,
   History,
+  Hunk,
+  HunkAction,
   Outcome,
   Remote,
+  RepoRef,
   RepoStatus,
   ResetMode,
+  SecretFinding,
   Resolved,
   StashEntry,
   StashMode,
@@ -23,6 +28,7 @@ import type {
   SyncResult,
   Tag,
   TimelineEntry,
+  Worktree,
 } from "./types";
 
 // The only way the UI touches git: named Rust commands (src-tauri/src/commands.rs).
@@ -110,3 +116,18 @@ export const resetImpact = (repo: string, hash: string) => invoke<number>("reset
 export const resetTo = (repo: string, hash: string, mode: ResetMode) => invoke<Outcome>("reset_to", { repo, hash, mode });
 export const fileTimeline = (repo: string, path: string) => invoke<TimelineEntry[]>("file_timeline", { repo, path });
 export const blameFile = (repo: string, path: string) => invoke<Blame>("blame_file", { repo, path });
+
+// ---- The Claude Code loop ----
+/** `lines`: indices into `hunk.lines` to act on (null = the whole hunk). Discard is irreversible: confirm first. */
+export const applyHunk = (repo: string, file: FileChange, hunk: Hunk, lines: number[] | null, action: HunkAction) =>
+  invoke<void>("apply_hunk", { repo, file, hunk, lines, action });
+/** Likely secrets in the next commit: staged changes, or everything when `stageAll`. */
+export const checkSecrets = (repo: string, stageAll: boolean) => invoke<SecretFinding[]>("check_secrets", { repo, stageAll });
+/** Returns the undone commit's message. */
+export const undoLastCommit = (repo: string) => invoke<string>("undo_last_commit", { repo });
+export const addToGitignore = (repo: string, path: string) => invoke<void>("add_to_gitignore", { repo, path });
+export const claudePrompts = (repo: string) => invoke<ClaudePrompt[]>("claude_prompts", { repo });
+export const listWorktrees = (repo: string) => invoke<Worktree[]>("list_worktrees", { repo });
+export const addWorktree = (repo: string, path: string, branch: string, newBranch: boolean) =>
+  invoke<RepoRef>("add_worktree", { repo, path, branch, newBranch });
+export const removeWorktree = (repo: string, path: string, force: boolean) => invoke<void>("remove_worktree", { repo, path, force });
