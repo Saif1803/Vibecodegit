@@ -69,6 +69,26 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
    - Shows step progress: `add → commit → pull → push`.
    - On success: clear the message and refresh. On failure: show which step failed with git's stderr, and keep the message.
 
+### Design: match the Claude desktop app
+- **Look:** the Claude desktop app's visual language.
+  - Warm neutral surfaces, hairline borders, 8–16 px radii, and the Claude clay accent `#D97757`.
+  - Line icons at 1.4 px stroke, inline SVG in `src/components/icons.tsx`. No icon library and no Anthropic logos.
+- **Themes:** light and dark are both first-class.
+  - The default follows the OS (`prefers-color-scheme`, live). A header button cycles System → Light → Dark, persisted in `localStorage`.
+  - `src/theme.ts` sets `<html data-theme>`.
+- **Tokens:** CSS variables in `src/index.css`, exposed to Tailwind via `@theme inline`.
+  - Classes: `bg-bg`, `bg-surface`, `bg-raised`, `bg-chip`, `bg-hover`, `border-line`, `border-line-strong`, `text-fg`, `text-fg-2`, `text-fg-3`, `bg-accent`, `text-accent-text`, `text-st-*`.
+  - Never hard-code hex values in components.
+  - Dark values were sampled from the app: bg `#151515`, surface `#1A1A19`, raised `#20201F`, chip `#2D2D2D`, line `#2A2A2A`, fg `#F0EFEC` / `#C3C2B7` / `#898781`.
+  - Light values use Claude's ivory palette: bg `#FAF9F5`, fg `#141413`.
+- **Type:** Segoe UI Variable. Claude's own fonts are proprietary and aren't bundled. 13 px body, 11–12 px secondary, Cascadia Mono for status letters.
+- **Patterns:**
+  - Commit box: styled like Claude's prompt box. Rounded-2xl raised surface, with the textarea above an action row.
+  - Primary button: accent fill. When disabled, it becomes a neutral chip, not a faded accent.
+  - Menus: raised surface, border, shadow, rounded-xl, rounded-lg hover rows.
+  - Checkboxes: custom, accent when checked.
+- **Global CSS:** base rules go in `@layer base`. Unlayered rules would override Tailwind utilities.
+
 ### Git execution rules
 - All git calls go through one TS wrapper, `runGit(repo, args)`, which calls `Command.create('git', args, { cwd: repo, env })`.
   - It never goes through a shell and never uses string concatenation, so the commit message and paths are passed as discrete argv items.
@@ -99,13 +119,18 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 ## Project layout (target)
 ```
 src/
-  main.tsx, App.tsx, index.css          # Tailwind entry
+  main.tsx, App.tsx
+  index.css                              # design tokens (light/dark) + Tailwind entry
+  theme.ts                               # system/light/dark preference -> <html data-theme>
+  git/types.ts                           # FileChange, BranchInfo, RepoRef shared types
+  components/icons.tsx, Checkbox.tsx, Header.tsx, StatusBar.tsx
+  preview/mock.ts                        # design-preview data (deleted in Phase 4)
   git/runGit.ts                          # Command wrapper (only place that touches plugin-shell)
   git/status.ts                          # porcelain v2 parser (pure, unit-tested)
   git/commitPush.ts                      # sequence orchestration (pure over an injected runner, unit-tested)
   state/recentRepos.ts                   # plugin-store MRU
   state/claudeSessions.ts                # invoke detect_claude_sessions, normalize to repo roots, auto-select rule
-  components/RepoPicker.tsx, BranchBar.tsx, FileList.tsx, CommitBox.tsx
+  components/RepoPicker.tsx, FileList.tsx, CommitBox.tsx
   hooks/useWindowBehavior.ts             # Esc, blur-hide, refresh-on-show
 src-tauri/
   src/lib.rs                             # tray, shortcut, show/hide/blur logic, plugin registration
@@ -152,9 +177,10 @@ src-tauri/
 - **Done when:** tests pass, and opening the window with Claude Code running in a repo auto-selects that repo and shows its real branch and files.
 
 ### Phase 4: UI
-- RepoPicker, BranchBar, FileList (checkboxes, select-all, badges, empty state), CommitBox.
+- The presentational components already exist from the design pass: Header/RepoPicker, StatusBar, FileList, CommitBox, and theme switching. They are currently fed by `src/preview/mock.ts`.
+- Wire them to real state, then delete `src/preview/`.
 - Loading, error, and banner states. Refresh on show. Ctrl+Enter wired up.
-- Compact dark/light styling that fits 380×500 with no page scroll; only the file list scrolls.
+- Everything fits 380×500 with no page scroll; only the file list scrolls.
 - **Done when:** every state renders correctly against a real repo, and the button's enabled/disabled logic is correct.
 
 ### Phase 5: Commit & Push and hardening

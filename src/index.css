@@ -1,5 +1,89 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens matching the Claude desktop app.
+ * Dark values were sampled from the app; light values are Claude's ivory palette.
+ * <html data-theme="light|dark"> is set by src/theme.ts (system default, user override).
+ */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #faf9f5;
+  --surface: #f5f4ee;
+  --raised: #ffffff;
+  --chip: #ebe9e1;
+  --hover: #ecebe4;
+  --line: #e3e1d8;
+  --line-strong: #c9c7be;
+  --fg: #141413;
+  --fg-2: #3d3d3a;
+  --fg-3: #73726c;
+  --accent: #d97757;
+  --accent-hover: #c6613f;
+  --accent-text: #c6613f;
+  --on-accent: #ffffff;
+  --scroll: #c9c7be;
+  --st-added: #3e7f3a;
+  --st-modified: #9a6a1c;
+  --st-deleted: #b5412f;
+  --st-renamed: #3b6ea8;
+  --st-untracked: #73726c;
+  --st-conflict: #b5412f;
+  --shadow: 0 8px 24px rgb(20 20 19 / 0.12), 0 1px 3px rgb(20 20 19 / 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #151515;
+  --surface: #1a1a19;
+  --raised: #20201f;
+  --chip: #2d2d2d;
+  --hover: #262625;
+  --line: #2a2a2a;
+  --line-strong: #4d4d4c;
+  --fg: #f0efec;
+  --fg-2: #c3c2b7;
+  --fg-3: #898781;
+  --accent: #d97757;
+  --accent-hover: #e08a6d;
+  --accent-text: #e08a6d;
+  --on-accent: #ffffff;
+  --scroll: #5d5c5a;
+  --st-added: #8fbf7f;
+  --st-modified: #d9a657;
+  --st-deleted: #e0776b;
+  --st-renamed: #7fa7d9;
+  --st-untracked: #95958d;
+  --st-conflict: #e0776b;
+  --shadow: 0 8px 24px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-chip: var(--chip);
+  --color-hover: var(--hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-text: var(--accent-text);
+  --color-on-accent: var(--on-accent);
+  --color-st-added: var(--st-added);
+  --color-st-modified: var(--st-modified);
+  --color-st-deleted: var(--st-deleted);
+  --color-st-renamed: var(--st-renamed);
+  --color-st-untracked: var(--st-untracked);
+  --color-st-conflict: var(--st-conflict);
+  --shadow-pop: var(--shadow);
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+}
+
 html,
 body,
 #root {
@@ -9,6 +93,35 @@ body,
 }
 
 body {
-  @apply bg-white text-zinc-900 antialiased select-none dark:bg-zinc-900 dark:text-zinc-100;
-  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  @apply bg-bg font-sans text-[13px] leading-5 text-fg antialiased select-none;
+}
+
+@layer base {
+  textarea {
+    @apply select-text;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+    outline-offset: 1px;
+  }
+}
+
+/* Thin, Claude-style scrollbars. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scroll);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }
