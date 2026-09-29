@@ -25,7 +25,6 @@ tauri-plugin-shell = "2.4.0"
 tauri-plugin-dialog = "2.8.0"
 tauri-plugin-store = "2.5.0"
 tauri-plugin-single-instance = "2.5.0"
-tauri-plugin-positioner = { version = "2.4.0", features = ["tray-icon"] }
 tauri-plugin-global-shortcut = "2.4.0"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -10,7 +10,6 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
   - `tauri-plugin-global-shortcut` registers the Ctrl+Shift+G toggle.
   - `tauri-plugin-dialog` provides the native folder picker.
   - `tauri-plugin-store` persists recent repos.
-  - `tauri-plugin-positioner` (feature `tray-icon`) places the window near the tray.
   - `tauri-plugin-single-instance` stops a second launch from creating a second tray icon.
 - Tray icon: Tauri core `tray-icon` feature (`TrayIconBuilder`)
 
@@ -21,9 +20,16 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 - Tray **left-click** toggles the window. The tray **menu** has Show and Quit.
 - **Ctrl+Shift+G** (global) toggles the window: show and focus it if hidden, hide it if visible.
 - The window is borderless (`decorations: false`), about **380×500**, not resizable, always on top, and sits near the tray.
-  - It is placed with the positioner (`TrayBottomCenter` / `TrayCenter`). If the tray has never been clicked, the positioner has no tray rect, so it falls back to the bottom-right of the primary monitor's work area.
+  - Placement is custom (`src-tauri/src/placement.rs`, pure and unit-tested). It uses `TrayIcon::rect()`, which works without a prior click, and the monitor work area. The taskbar edge is inferred from where the tray icon sits, and the result is clamped on-screen.
+  - With no tray rect, the window falls back to the bottom-right of the work area.
+  - With an **auto-hide taskbar**, Windows reports the full monitor as the work area. The taskbar rect (`SHAppBarMessage`, `src-tauri/src/taskbar.rs`) is subtracted, so the window never sits under the taskbar when it slides up.
 - **Hide on blur** and **hide on Esc**.
-  - Blur-hide is suppressed while the native folder dialog is open, because the dialog steals focus.
+  - Blur-hide is suppressed while the native folder dialog is open, because the dialog steals focus. The frontend calls the Rust command `set_blur_hide(enabled)`.
+  - **Tray-click focus quirks (Windows):**
+    - Explorer re-activates the taskbar right after a tray click. A blur within 500 ms of showing therefore re-focuses the window once, instead of hiding it.
+    - A tray click within 400 ms of a blur-hide is the click that caused that blur, so it leaves the window hidden.
+  - Alt+F4 hides the window instead of closing it. Only the tray menu's Quit exits the app.
+  - On every show, Rust emits a `window-shown` event to the webview (used for refresh-on-show).
 - Status is refreshed every time the window is shown.
 
 ### Auto-detect the Claude Code working folder
@@ -85,7 +91,7 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
   - `dialog:allow-open`
   - `store:default`
   - `core:default`, plus `core:window:allow-show`/`allow-hide`/`allow-set-focus`
-- The global shortcut, positioner, tray, and single-instance are driven **from Rust only**. They have no JS packages and grant no webview permissions.
+- The global shortcut, window placement, tray, and single-instance are driven **from Rust only**. They have no JS packages and grant no webview permissions.
 - The CSP is explicit in `tauri.conf.json`.
   - `style-src` includes `'unsafe-inline'`, and `dangerousDisableAssetCspModification: ["style-src"]` is set because Vite/Tailwind inject `<style>` tags and a Tauri nonce would disable `'unsafe-inline'`.
   - Everything else is `'self'` plus IPC.
@@ -102,7 +108,9 @@ src/
   components/RepoPicker.tsx, BranchBar.tsx, FileList.tsx, CommitBox.tsx
   hooks/useWindowBehavior.ts             # Esc, blur-hide, refresh-on-show
 src-tauri/
-  src/lib.rs                             # tray, shortcut, positioning, plugin registration
+  src/lib.rs                             # tray, shortcut, show/hide/blur logic, plugin registration
+  src/placement.rs                       # pure placement math (unit-tested)
+  src/taskbar.rs                         # Windows taskbar rect via SHAppBarMessage
   src/claude.rs                          # detect_claude_sessions (read-only scan of ~/.claude/projects)
   capabilities/default.json
   tauri.conf.json
@@ -129,7 +137,7 @@ src-tauri/
 
 ### Phase 2: Tray, hotkey, and window behavior
 - Tray icon with Show/Quit menu. Left-click toggles.
-- Ctrl+Shift+G global toggle. Positioner near the tray, with the work-area fallback.
+- Ctrl+Shift+G global toggle. Window placed near the tray, including with an auto-hide taskbar.
 - Hide on blur and on Esc. Single-instance.
 - **Done when:** the hotkey and tray both toggle reliably, the window appears near the tray, clicking elsewhere or pressing Esc hides it, and Quit exits.
 

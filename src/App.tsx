@@ -1,4 +1,8 @@
+import { useWindowBehavior } from "./hooks/useWindowBehavior";
+
 export default function App() {
+  useWindowBehavior();
+
   return (
     <main className="flex h-full flex-col border border-zinc-300 dark:border-zinc-700">
       <header className="border-b border-zinc-200 px-3 py-2 text-sm font-semibold dark:border-zinc-800">
