@@ -33,16 +33,6 @@
   --st-conflict: #b5412f;
   /* The fifth commit-graph lane color (the others reuse accent and status colors). */
   --graph-violet: #7c5cb0;
-  /* File-type icon colors (VS Code's Seti palette, darkened for contrast on ivory). */
-  --ft-blue: #3b7a96;
-  --ft-cyan: #1f8aa6;
-  --ft-yellow: #8c8414;
-  --ft-orange: #c05f1e;
-  --ft-red: #b8323a;
-  --ft-green: #5b8a26;
-  --ft-purple: #7d55a3;
-  --ft-pink: #c23c6c;
-  --ft-grey: #66757b;
   --shadow: 0 8px 24px rgb(20 20 19 / 0.12), 0 1px 3px rgb(20 20 19 / 0.08);
 }
 
@@ -70,15 +60,6 @@
   --st-untracked: #95958d;
   --st-conflict: #e0776b;
   --graph-violet: #b39ddb;
-  --ft-blue: #519aba;
-  --ft-cyan: #4fb8d4;
-  --ft-yellow: #cbcb41;
-  --ft-orange: #e37933;
-  --ft-red: #cc3e44;
-  --ft-green: #8dc149;
-  --ft-purple: #a074c4;
-  --ft-pink: #f55385;
-  --ft-grey: #7f8e94;
   --shadow: 0 8px 24px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
 }
 
@@ -103,15 +84,6 @@
   --color-st-renamed: var(--st-renamed);
   --color-st-untracked: var(--st-untracked);
   --color-st-conflict: var(--st-conflict);
-  --color-ft-blue: var(--ft-blue);
-  --color-ft-cyan: var(--ft-cyan);
-  --color-ft-yellow: var(--ft-yellow);
-  --color-ft-orange: var(--ft-orange);
-  --color-ft-red: var(--ft-red);
-  --color-ft-green: var(--ft-green);
-  --color-ft-purple: var(--ft-purple);
-  --color-ft-pink: var(--ft-pink);
-  --color-ft-grey: var(--ft-grey);
   --shadow-pop: var(--shadow);
   --font-sans: "Inter Variable", "Segoe UI Variable Text", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;

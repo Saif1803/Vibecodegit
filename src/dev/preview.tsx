@@ -28,13 +28,14 @@ let conflicted: FileChange[] = [];
 if (scenario === "clean") (staged = []), (unstaged = []);
 if (scenario === "blocked") conflicted = [{ path: "src/App.tsx", kind: "conflicted" }];
 if (scenario === "secrets") unstaged = [...unstaged, { path: ".env", kind: "untracked" }];
-// One file per file-type icon (src/components/fileIcons.tsx).
+// A spread of vscode-icons file-type icons (src/components/fileIcons.tsx), some with light-theme variants.
 if (scenario === "icons")
   unstaged = [
-    "a.ts", "a.tsx", "a.js", "a.json", "a.css", "a.scss", "a.html", "a.md", "a.rs", "a.py", "a.go", "a.rb", "a.java",
-    "a.kt", "a.c", "a.cpp", "a.cs", "a.php", "a.vue", "a.svelte", "a.sh", "a.yml", "a.toml", "yarn.lock", "a.png",
-    "a.svg", "a.txt", "LICENSE", "a.pdf", "a.zip", "a.sql", "a.woff2", "a.csv", "package.json", "Dockerfile",
-    ".gitignore", "README",
+    "a.ts", "a.tsx", "a.d.ts", "a.test.ts", "a.js", "a.jsx", "a.json", "a.css", "a.scss", "a.html", "a.md",
+    "CLAUDE.md", "a.rs", "a.py", "a.go", "a.rb", "a.java", "a.kt", "a.c", "a.cpp", "a.cs", "a.php", "a.vue",
+    "a.svelte", "a.sh", "a.ps1", "a.yml", "a.toml", "a.png", "a.svg", "a.txt", "a.pdf", "a.zip", "a.sql",
+    "a.woff2", "a.csv", "a.log", "package.json", "yarn.lock", "Cargo.toml", "tsconfig.json", "vite.config.ts",
+    "tauri.conf.json", "Dockerfile", ".gitignore", ".env", "Makefile", "LICENSE", "README",
   ].map((path) => ({ path, kind: "modified" }));
 let ahead = scenario === "ahead" ? 2 : 0;
 const behind = scenario === "ahead" ? 1 : 0;
