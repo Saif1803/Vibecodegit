@@ -124,12 +124,16 @@ src/
   theme.ts                               # system/light/dark preference -> <html data-theme>
   git/types.ts                           # FileChange, BranchInfo, RepoRef shared types
   components/icons.tsx, Checkbox.tsx, Header.tsx, StatusBar.tsx
-  preview/mock.ts                        # design-preview data (deleted in Phase 4)
-  git/runGit.ts                          # Command wrapper (only place that touches plugin-shell)
+  git/runGit.ts                          # GitRunner type + tauriGit (only place that touches plugin-shell)
+  git/repo.ts                            # resolveRepo (subfolder -> root), path normalize/compare
   git/status.ts                          # porcelain v2 parser (pure, unit-tested)
   git/commitPush.ts                      # sequence orchestration (pure over an injected runner, unit-tested)
   state/recentRepos.ts                   # plugin-store MRU
   state/claudeSessions.ts                # invoke detect_claude_sessions, normalize to repo roots, auto-select rule
+  state/selection.ts                     # checkbox reconciliation across refreshes
+  state/pickFolder.ts                    # dialog + set_blur_hide pause
+  state/useRepoState.ts                  # the app's data hook; refreshes on `window-shown`
+  test/nodeGit.ts                        # test-only GitRunner on child_process + throwaway repos
   components/RepoPicker.tsx, FileList.tsx, CommitBox.tsx
   hooks/useWindowBehavior.ts             # Esc, blur-hide, refresh-on-show
 src-tauri/
@@ -177,8 +181,8 @@ src-tauri/
 - **Done when:** tests pass, and opening the window with Claude Code running in a repo auto-selects that repo and shows its real branch and files.
 
 ### Phase 4: UI
-- The presentational components already exist from the design pass: Header/RepoPicker, StatusBar, FileList, CommitBox, and theme switching. They are currently fed by `src/preview/mock.ts`.
-- Wire them to real state, then delete `src/preview/`.
+- Components are already wired to real state (`useRepoState`) as of Phase 3. The mock data is gone.
+- Polish the states: proper notice/error banners, a Claude-active poll every 5 s while visible, and the commit confirmation when Claude is active.
 - Loading, error, and banner states. Refresh on show. Ctrl+Enter wired up.
 - Everything fits 380×500 with no page scroll; only the file list scrolls.
 - **Done when:** every state renders correctly against a real repo, and the button's enabled/disabled logic is correct.

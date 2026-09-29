@@ -15,6 +15,9 @@ interface Props {
   selected: Set<string>;
   onToggle: (path: string, checked: boolean) => void;
   onToggleAll: (checked: boolean) => void;
+  /** Replaces the list (loading, no repo, errors). */
+  placeholder?: string;
+  tone?: "muted" | "error";
 }
 
 function split(path: string) {
@@ -22,7 +25,7 @@ function split(path: string) {
   return i < 0 ? { dir: "", name: path } : { dir: path.slice(0, i), name: path.slice(i + 1) };
 }
 
-export function FileList({ files, selected, onToggle, onToggleAll }: Props) {
+export function FileList({ files, selected, onToggle, onToggleAll, placeholder, tone = "muted" }: Props) {
   const count = files.filter((f) => selected.has(f.path)).length;
   const all = files.length > 0 && count === files.length;
 
@@ -45,8 +48,14 @@ export function FileList({ files, selected, onToggle, onToggleAll }: Props) {
         )}
       </header>
 
-      {files.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-fg-3">Working tree clean</div>
+      {placeholder !== undefined || files.length === 0 ? (
+        <div
+          className={`flex flex-1 items-center justify-center px-6 text-center break-words select-text ${
+            tone === "error" ? "text-st-deleted" : "text-fg-3"
+          }`}
+        >
+          {placeholder ?? "Working tree clean"}
+        </div>
       ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto py-1">
           {files.map((f) => {

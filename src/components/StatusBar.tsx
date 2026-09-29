@@ -1,7 +1,7 @@
 import type { BranchInfo } from "../git/types";
 
 interface Props {
-  branch: BranchInfo;
+  branch: BranchInfo | null;
   claudeActive: boolean;
 }
 
@@ -10,7 +10,7 @@ export function StatusBar({ branch, claudeActive }: Props) {
   return (
     <div className="flex h-6 items-center gap-2 px-4 text-[12px] text-fg-3">
       <span className="min-w-0 truncate">
-        {branch.head === null ? (
+        {branch === null ? null : branch.head === null ? (
           "Detached HEAD"
         ) : branch.upstream === null ? (
           "No upstream"

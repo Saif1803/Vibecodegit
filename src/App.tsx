@@ -3,54 +3,64 @@ import { CommitBox } from "./components/CommitBox";
 import { FileList } from "./components/FileList";
 import { Header } from "./components/Header";
 import { StatusBar } from "./components/StatusBar";
-import type { RepoRef } from "./git/types";
 import { useWindowBehavior } from "./hooks/useWindowBehavior";
-import { mockActive, mockBranch, mockFiles, mockRecent } from "./preview/mock";
+import { isClaudeActive } from "./state/claudeSessions";
+import { useRepoState } from "./state/useRepoState";
 import { useTheme } from "./theme";
 
 export default function App() {
   useWindowBehavior();
   const { pref, cycle } = useTheme();
-
-  // Design preview wiring; real data arrives in Phases 3–4.
-  const [repo, setRepo] = useState<RepoRef | null>(mockRecent[0]);
-  const [selected, setSelected] = useState(() => new Set(mockFiles.filter((f) => f.staged).map((f) => f.path)));
+  const s = useRepoState();
   const [message, setMessage] = useState("");
 
-  const toggle = (path: string, checked: boolean) =>
-    setSelected((s) => {
-      const next = new Set(s);
-      if (checked) next.add(path);
-      else next.delete(path);
-      return next;
-    });
+  const files = s.status?.files ?? [];
+  const placeholder = s.error
+    ? s.error
+    : !s.repo
+      ? "Choose a repository to get started"
+      : !s.status
+        ? "Loading…"
+        : undefined;
 
   return (
     <main className="flex h-full flex-col border border-line bg-bg">
       <Header
-        repo={repo}
-        branch={mockBranch.head}
-        active={mockActive}
-        recent={mockRecent}
-        onSelectRepo={setRepo}
-        onBrowse={() => {}}
+        repo={s.repo}
+        branch={s.status ? (s.status.branch.head ?? "detached") : null}
+        active={s.claude.repos}
+        recent={s.recent}
+        onSelectRepo={(r) => void s.selectRepo(r)}
+        onBrowse={() => void s.browse()}
         theme={pref}
         onCycleTheme={cycle}
       />
-      <StatusBar branch={mockBranch} claudeActive={repo?.path === mockActive[0].path} />
-      <div className="h-2 shrink-0" />
+      <StatusBar branch={s.status?.branch ?? null} claudeActive={isClaudeActive(s.repo?.path ?? null, s.claude.repos)} />
+      {s.notice && (
+        <div className="mx-3 mb-1 flex items-start gap-2 rounded-lg bg-chip px-3 py-1.5 text-[12px] text-fg-2">
+          <span className="min-w-0 flex-1 break-words">{s.notice}</span>
+          <button type="button" onClick={s.dismissNotice} className="shrink-0 text-fg-3 hover:text-fg" aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
+      <div className="h-1 shrink-0" />
       <FileList
-        files={mockFiles}
-        selected={selected}
-        onToggle={toggle}
-        onToggleAll={(all) => setSelected(new Set(all ? mockFiles.map((f) => f.path) : []))}
+        files={files}
+        selected={s.selected}
+        onToggle={s.toggle}
+        onToggleAll={s.toggleAll}
+        placeholder={placeholder}
+        tone={s.error ? "error" : "muted"}
       />
       <CommitBox
         message={message}
         onMessage={setMessage}
-        canCommit={selected.size > 0 && message.trim().length > 0}
+        canCommit={!!s.status && s.selected.size > 0 && message.trim().length > 0}
         busy={false}
-        onCommit={() => {}}
+        onCommit={() => {
+          // Commit & Push lands in Phase 5.
+        }}
       />
     </main>
   );

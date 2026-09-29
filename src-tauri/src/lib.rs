@@ -1,3 +1,4 @@
+mod claude;
 mod placement;
 mod taskbar;
 
@@ -136,6 +137,17 @@ fn on_tray_click(app: &AppHandle) {
     }
 }
 
+/// Recent Claude Code sessions (newest first) with their working directories.
+#[tauri::command]
+async fn detect_claude_sessions(app: AppHandle) -> Result<Vec<claude::ClaudeSession>, String> {
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        claude::scan(&claude::projects_dir(&home), std::time::SystemTime::now(), claude::MAX_AGE)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// Lets the frontend suspend hide-on-blur while a native dialog is open.
 #[tauri::command]
 fn set_blur_hide(state: tauri::State<WindowState>, enabled: bool) {
@@ -160,7 +172,7 @@ pub fn run() {
                 .build(),
         )
         .manage(WindowState { blur_hide: AtomicBool::new(true), ..Default::default() })
-        .invoke_handler(tauri::generate_handler![set_blur_hide])
+        .invoke_handler(tauri::generate_handler![set_blur_hide, detect_claude_sessions])
         .setup(|app| {
             let show_item = MenuItem::with_id(app, "show", "Show  (Ctrl+Shift+G)", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit ClaudeGit", true, None::<&str>)?;

@@ -21,10 +21,10 @@ export function Header({ repo, branch, active, recent, onSelectRepo, onBrowse, t
   return (
     <header className="flex h-12 shrink-0 items-center gap-1.5 px-2.5">
       <RepoPicker current={repo} active={active} recent={recent} onSelect={onSelectRepo} onBrowse={onBrowse} />
-      {repo && (
+      {repo && branch !== null && (
         <span className="flex h-[22px] max-w-[120px] min-w-0 shrink-0 items-center gap-1 rounded-md bg-chip px-1.5 text-[12px] text-fg-2">
           <BranchIcon width={12} height={12} className="shrink-0" />
-          <span className="truncate">{branch ?? "detached"}</span>
+          <span className="truncate">{branch}</span>
         </span>
       )}
       <button
