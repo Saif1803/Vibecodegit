@@ -1,6 +1,6 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
-import { resolveRepo, samePath } from "../git/repo";
-import type { GitRunner } from "../git/runGit";
+import { resolveRepo } from "../git/api";
+import { samePath } from "../git/repo";
 import type { RepoRef } from "../git/types";
 
 export const MAX_RECENT = 8;
@@ -32,8 +32,8 @@ export async function rememberRepo(repo: RepoRef): Promise<RepoRef[]> {
 }
 
 /** Drops repos that no longer exist or are no longer repos; returns what was removed. */
-export async function pruneRecent(run: GitRunner, list: RepoRef[]): Promise<{ kept: RepoRef[]; removed: RepoRef[] }> {
-  const checks = await Promise.all(list.map((r) => resolveRepo(run, r.path)));
+export async function pruneRecent(list: RepoRef[]): Promise<{ kept: RepoRef[]; removed: RepoRef[] }> {
+  const checks = await Promise.all(list.map((r) => resolveRepo(r.path)));
   const kept = list.filter((_, i) => checks[i].ok);
   const removed = list.filter((_, i) => !checks[i].ok);
   if (removed.length > 0) await saveRecent(kept);

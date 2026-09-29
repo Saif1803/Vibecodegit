@@ -4,9 +4,9 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 
 ## Stack
 
-- **Tauri 2** (Rust shell), **React 19 + TypeScript** (Vite 8), **Tailwind CSS v4** (`@tailwindcss/vite`), **Vitest**
+- **Tauri 2** (Rust), **React 19 + TypeScript** (Vite 8), **Tailwind CSS v4** (`@tailwindcss/vite`), **Vitest**, `cargo test`
+- **Rust owns all git work** (`src-tauri/src/git/`). It runs the **system `git`** with `std::process::Command`: no shell, one argv item per argument, and no console window (`CREATE_NO_WINDOW`). Git is the only external program. The UI is React on the Claude design system and reaches git only through named Tauri commands (`src-tauri/src/commands.rs`, wrapped in `src/git/api.ts`).
 - Tauri plugins:
-  - `tauri-plugin-shell` runs the **system `git`**. It is the only external program allowed.
   - `tauri-plugin-global-shortcut` registers the Ctrl+Shift+G toggle.
   - `tauri-plugin-dialog` provides the native folder picker.
   - `tauri-plugin-store` persists recent repos.
@@ -19,7 +19,8 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 - The app lives only in the system tray. It has no taskbar entry (`skipTaskbar: true`) and the window starts hidden.
 - Tray **left-click** toggles the window. The tray **menu** has Show and Quit.
 - **Ctrl+Shift+G** (global) toggles the window: show and focus it if hidden, hide it if visible.
-- The window is borderless (`decorations: false`), about **380×500**, not resizable, always on top, and sits near the tray.
+- The window is borderless (`decorations: false`), **380×500** when compact, not resizable, always on top, and sits near the tray.
+  - **Expanded mode:** opening a detail pane (a diff, a commit, the graph) widens the window to about **960×640** (clamped to the work area) via the Rust command `set_expanded(expanded)`. The compact column stays on the left and the detail pane sits on the right. Closing the pane, Esc, or hiding collapses it back.
   - Placement is custom (`src-tauri/src/placement.rs`, pure and unit-tested). It uses `TrayIcon::rect()`, which works without a prior click, and the monitor work area. The taskbar edge is inferred from where the tray icon sits, and the result is clamped on-screen.
   - With no tray rect, the window falls back to the bottom-right of the work area.
   - With an **auto-hide taskbar**, Windows reports the full monitor as the work area. The taskbar rect (`SHAppBarMessage`, `src-tauri/src/taskbar.rs`) is subtracted, so the window never sits under the taskbar when it slides up.
@@ -36,12 +37,12 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 - **Source:** every Claude Code session (CLI, desktop app, IDE) appends to `~/.claude/projects/<encoded>/<session-id>.jsonl`. Use `$CLAUDE_CONFIG_DIR/projects` if that env var is set.
   - Most entries carry a `cwd` field with the exact working directory.
   - Never decode the `<encoded>` folder name. It is lossy (`\`, `:`, `_` all become `-`).
-- **Detection (Rust command `detect_claude_sessions`):**
+- **Detection (Rust command `claude_repos`, `src-tauri/src/claude.rs`):**
   1. Find the `*.jsonl` files modified in the last 24 h, newest first.
   2. For each, read **backward from the end in chunks** until a line with a `cwd` is found. Lines can be huge, and some types (for example `file-history-snapshot`) have no `cwd`.
   3. Return `{ cwd, sessionId, lastActiveMs }`, deduplicated by `cwd` and keeping the newest.
   - Read-only. No `fs` plugin permission is needed, because the command runs in Rust.
-- **Normalization (TS):** each `cwd` goes through `git rev-parse --show-toplevel`.
+- **Normalization (Rust, `git/repo.rs`):** each `cwd` goes through `git rev-parse --show-toplevel` (successes cached), and sessions in the same repo are merged. The command returns `{ repos, nonRepos, newestSessionId }`.
   - A subfolder resolves to its repo root. Worktrees resolve to the worktree, which is correct.
   - A `cwd` that isn't a git repo shows as "Claude is in <folder>, not a git repo" and is not selectable.
 - **On every window show:**
@@ -60,13 +61,18 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
    - Invalid folders show an inline error and are not saved.
    - Repos that no longer exist are dropped from the list, with a notice.
 2. **Current branch** with ahead/behind counts against upstream (or "no upstream"). Detached HEAD is shown as such.
-3. **Changed files list**: a checkbox per file, a status badge (M/A/D/R/?/U), and the path.
-   - A select-all checkbox sits in the header.
+   - Clicking the ahead/behind text runs **Sync** (pull, then push), or **Publish branch** when there's no upstream. The header's ⋯ menu has Fetch, Pull, Push and Sync.
+3. **Changes list**, VS Code-style, in up to three sections: **Merge Changes** (conflicted), **Staged Changes**, and **Changes** (unstaged + untracked).
+   - A file with both staged and unstaged edits appears in both sections.
+   - Each row has a status badge (M/A/D/R/U/!) and the path. Hover actions: **Stage** (+) and **Discard** on unstaged rows, **Unstage** (−) on staged rows.
+   - Section headers have Stage All / Unstage All / Discard All.
+   - Clicking a row opens its **diff** in the expanded pane (staged diff for staged rows, working-tree diff otherwise, whole-file for untracked).
    - Scrolls if long. Shows an empty state ("Working tree clean").
-4. **Commit message** textarea. **Ctrl+Enter** triggers Commit & Push.
-5. **"Commit & Push"** button.
-   - Disabled when no files are checked, the message is empty, or an operation is running.
-   - Shows step progress: `add → commit → pull → push`.
+4. **Commit message** textarea. **Ctrl+Enter** runs the primary commit action.
+5. **Commit split button:** the main button runs the chosen action (**Commit & Push** or **Commit**, remembered in `localStorage`); its chevron menu switches the action and toggles **Amend last commit**.
+   - It commits **what is staged**. If nothing is staged but there are changes, it stages everything first and the hint says so (VS Code's "smart commit").
+   - Disabled when there's nothing to commit, the message is empty (allowed when amending: keeps the old message), or an operation is running.
+   - Shows step progress for the steps that apply: `stage → commit → pull → push`.
    - On success: clear the message and refresh. On failure: show which step failed with git's stderr, and keep the message.
 
 ### Design: match the Claude desktop app
@@ -90,19 +96,25 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 - **Global CSS:** base rules go in `@layer base`. Unlayered rules would override Tailwind utilities.
 
 ### Git execution rules
-- All git calls go through one TS wrapper, `runGit(repo, args)`, which calls `Command.create('git', args, { cwd: repo, env })`.
-  - It never goes through a shell and never uses string concatenation, so the commit message and paths are passed as discrete argv items.
+- All git runs in Rust (`src-tauri/src/git/mod.rs`): `run(repo, args)` spawns `git` directly with `current_dir = repo`.
+  - Never through a shell and never string concatenation: the commit message and every path are discrete argv items.
+  - The webview can't pass git arguments. It can only call the named commands in `commands.rs` (`git_status`, `stage`, `unstage`, `discard`, `file_diff`, `commit_push`, `sync`, …), each of which runs on a blocking thread.
 - Env on every call: `GIT_TERMINAL_PROMPT=0`, so a missing credential fails fast instead of hanging. Git Credential Manager's GUI prompt still works.
 - Also on every call: `-c core.quotepath=off`, `-c color.ui=false`.
-- Status: `git --no-optional-locks status --porcelain=v2 --branch -z --untracked-files=all`, parsed in TS. This covers branch, upstream, ahead/behind, and entries, including renames and unmerged files.
+- **Path lists** go over stdin with `--literal-pathspecs … --pathspec-from-file=- --pathspec-file-nul` (`with_paths`). There's no command-line length limit, and a file named `[ab].ts` never globs. (`git clean` lacks that flag, so it's chunked under 30k characters.)
+- Status (`git/status.rs`): `git --no-optional-locks status --porcelain=v2 --branch -z --untracked-files=all`, parsed into staged / unstaged / conflicted. In-progress operations are read from marker files in `rev-parse --absolute-git-dir` (per-worktree), and the commit blocker is computed there too.
   - `--no-optional-locks` stops the background status from holding `index.lock` while a commit (ours, Claude's, or a terminal's) needs it.
-- **Checkbox semantics:** the checkboxes choose what goes into *this* commit. On first load, a file is pre-checked if it is already staged.
-- **Commit & Push sequence** (`src/git/commitPush.ts`):
-  1. **add:** `git add -- <checked untracked paths>`, and only those. `add -A` on a staged rename's old path or a staged deletion fails with "pathspec did not match".
-  2. **commit:** `git commit -m <msg> -- <checked paths, both sides of renames>`.
-     - This commits the working-tree state of exactly those paths: modifications, deletions and renames.
-     - Anything else already staged stays staged.
-  3. **pull:** `git fetch`, then if behind:
+- **Staging model** (`git/ops.rs`): the index *is* the next commit, as in VS Code.
+  - Stage: `git add <paths>`. Stage All: `git add -A`.
+  - Unstage: `git restore --staged <paths, both sides of renames>`. On an unborn branch (no HEAD yet): drop the index entries with `--cached`.
+  - Discard: tracked → `git restore --worktree <paths>` (back to the staged version); untracked → `git clean -f -q -- <paths>`. Always behind a confirm dialog that names what will be lost.
+- **Diffs** (`git/diff.rs`): `git diff [--cached -M] --no-ext-diff --no-textconv -- <paths>`; untracked (and, for now, conflicted) files use `git diff --no-index -- /dev/null <path>` (exit 1 means "differs", not failure). Parsed into numbered hunks; binary files are flagged and diffs are capped at 5,000 lines.
+- **Destructive operations** (discard, reset --hard, drop stash, delete branch, amending a pushed commit) always go through a confirm dialog that says exactly what will be lost.
+- **Commit & Push sequence** (`git/commit.rs`; steps stream to the UI over a Tauri `Channel`):
+  1. **stage:** only when nothing is staged: `git add -A`.
+  2. **commit:** `git commit -m <msg>`, or `git commit --amend -m <msg>` / `--amend --no-edit`.
+     - If the amended commit was already on the upstream (`merge-base --is-ancestor HEAD @{u}`), the user confirms first, the pull is skipped, and the push is `git push --force-with-lease`.
+  3. **pull** (`git/sync.rs`, also used by the Pull/Sync buttons): `git fetch`, then if behind:
      - stash tracked changes,
      - `git rebase --no-autostash @{u}`,
      - `git stash pop --index`.
@@ -114,23 +126,21 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 - **Rebase conflict:** run `git rebase --abort` so the repo is never left mid-rebase, then restore the stash. Report that the commit is saved locally.
 - **After a failed pull or push:** the commit already exists, so the message is cleared to prevent a duplicate commit. It's kept only if nothing was committed.
 - **Unmerged files / rebase or merge in progress / detached HEAD:** show a banner and disable the commit.
-- **Known limit:** the pathspec must fit on one command line, about 30k characters or roughly 700 files. Past that, the app asks you to commit from a terminal.
 
 ### Testing
-- **Unit tests:** pure logic over a scripted fake `GitRunner`.
-- **Live tests:** `src/test/nodeGit.ts` runs the real `git` in throwaway repos.
-- **End-to-end tests** (`commitPush.e2e.test.ts`): a local bare remote plus a "teammate" clone.
+- **Rust (`cargo test` in `src-tauri`):** parsers as pure unit tests. Everything else runs against the real `git` in throwaway repos (`git/testutil.rs`).
+  - End-to-end cases use a local bare remote plus a "teammate" clone (`with_remote`).
   - Clones must set `core.autocrlf=false` at clone time, since your global `autocrlf=true` would make every file look modified.
-- **UI states:** `npm run dev`, then open `http://localhost:1420/preview.html?s=normal|claude|blocked|conflict|pushfail|clean|norepo`.
-  - This is the real App with Tauri IPC mocked (`src/dev/preview.tsx`). It's dev-only and not part of the build.
+  - Test file names must be valid on Windows (no `*`, `?`, `:`).
+- **Vitest (`npm test`):** UI-side logic only: path compare, MRU, auto-select, Claude-active window.
+- **UI states:** `npm run dev`, then open `http://localhost:1420/preview.html?s=normal|claude|blocked|conflict|pushfail|clean|norepo|unborn|ahead`.
+  - This is the real App with the Rust commands mocked by an in-memory fake repo (`src/dev/preview.tsx`). It's dev-only and not part of the build.
+  - Emulate 380×500 for compact and 960×640 for the diff pane.
 - Don't drive the user's real desktop with synthetic mouse or keyboard input to test the tray app. Use the preview, read-only window queries, and logs.
 
 ### Security / capabilities
-- `src-tauri/capabilities/default.json` grants only what's needed:
-  - `shell:allow-execute` scoped to `{ "name": "git", "cmd": "git", "args": true }`. No `shell:allow-open`, no spawn of anything else, no sidecars.
-  - `dialog:allow-open`
-  - `store:default`
-  - `core:default`, plus `core:window:allow-show`/`allow-hide`/`allow-set-focus`
+- `src-tauri/capabilities/default.json` grants only `core:default`, `dialog:allow-open` and `store:default`.
+  - There's no shell plugin at all. Git access is only through the app's own named commands, which take typed arguments (paths, file lists, options), never raw git args.
 - The global shortcut, window placement, tray, and single-instance are driven **from Rust only**. They have no JS packages and grant no webview permissions.
 - The CSP is explicit in `tauri.conf.json`.
   - `style-src` includes `'unsafe-inline'`, and `dangerousDisableAssetCspModification: ["style-src"]` is set because Vite/Tailwind inject `<style>` tags and a Tauri nonce would disable `'unsafe-inline'`.
@@ -142,41 +152,44 @@ src/
   main.tsx, App.tsx
   index.css                              # design tokens (light/dark) + Tailwind entry
   theme.ts                               # system/light/dark preference -> <html data-theme>
-  git/types.ts                           # FileChange, BranchInfo, RepoRef shared types
-  components/icons.tsx, Checkbox.tsx, Header.tsx, StatusBar.tsx
-  git/runGit.ts                          # GitRunner type + tauriGit (only place that touches plugin-shell)
-  git/repo.ts                            # resolveRepo (subfolder -> root), path normalize/compare
-  git/status.ts                          # porcelain v2 parser (pure, unit-tested)
-  git/commitPush.ts                      # sequence orchestration (pure over an injected runner, unit-tested)
+  git/types.ts                           # TS mirrors of the Rust serde types
+  git/api.ts                             # typed invoke wrappers: the UI's only way to reach git
+  git/repo.ts                            # path normalize/compare for the UI
+  components/icons.tsx, Header.tsx, StatusBar.tsx, Banner.tsx, StepProgress.tsx
+  components/RepoPicker.tsx, ChangesList.tsx, CommitBox.tsx, DiffView.tsx, ConfirmDialog.tsx, Menu.tsx
   state/recentRepos.ts                   # plugin-store MRU
-  state/claudeSessions.ts                # invoke detect_claude_sessions, normalize to repo roots, auto-select rule
-  state/selection.ts                     # checkbox reconciliation across refreshes
+  state/claudeSessions.ts                # auto-select rule, Claude-active window
   state/pickFolder.ts                    # dialog + set_blur_hide pause
   state/useRepoState.ts                  # the app's data hook; refreshes on `window-shown`
-  test/nodeGit.ts                        # test-only GitRunner on child_process + throwaway repos
-  components/RepoPicker.tsx, FileList.tsx, CommitBox.tsx
-  hooks/useWindowBehavior.ts             # Esc, blur-hide, refresh-on-show
+  hooks/useWindowBehavior.ts             # Esc, blur-hide, refresh-on-show, set_expanded
+  dev/preview.tsx                        # browser preview with mocked commands
 src-tauri/
-  src/lib.rs                             # tray, shortcut, show/hide/blur logic, plugin registration
+  src/lib.rs                             # tray, shortcut, show/hide/blur/expand, plugin + command registration
+  src/commands.rs                        # the Tauri commands the webview may call
+  src/git/mod.rs                         # the git runner (argv only, stdin pathspecs, no console window)
+  src/git/status.rs, ops.rs, diff.rs, sync.rs, commit.rs, repo.rs
+  src/git/testutil.rs                    # throwaway repos + bare remotes for tests
   src/placement.rs                       # pure placement math (unit-tested)
   src/taskbar.rs                         # Windows taskbar rect via SHAppBarMessage
-  src/claude.rs                          # detect_claude_sessions (read-only scan of ~/.claude/projects)
+  src/claude.rs                          # read-only scan of ~/.claude/projects
   capabilities/default.json
   tauri.conf.json
 ```
 
 ## Commands
 - `npm run tauri dev`: run the app in dev mode
-- `npm test`: Vitest (parser + orchestration)
+- `cargo test` (in `src-tauri`): git layer, parsers, placement, session scan
+- `npm test`: Vitest (UI-side logic)
 - `npm run typecheck`: `tsc --noEmit`
 - `npm run tauri build`: release bundle (MSI/NSIS)
 
 ## Conventions
-- Keep git logic in `src/git/*` as pure functions over an injected `runGit`, so it can be tested without Tauri.
-- Keep the Rust side thin: tray, shortcut, window positioning, plugin setup, and the read-only Claude session scan. No git in Rust.
+- All git logic lives in Rust under `src-tauri/src/git/`, exposed as narrow named commands. The TS side is UI and UI state only.
+- Every git module gets live tests against the real `git` in throwaway repos.
+- TS types in `src/git/types.ts` mirror the serde types; change both together.
 - No new dependencies beyond the stack above without asking.
 
-## Plan (5 phases; stop for review after each)
+## Plan (10 phases; stop for review after each. Phases 1–5 are done.)
 
 ### Phase 1: Scaffold and lockdown
 - `create-tauri-app` (React + TS + Vite), Tailwind v4 wired in, Vitest set up.
@@ -213,3 +226,47 @@ src-tauri/
 - Manual end-to-end run against a scratch repo with a local bare remote.
 - `npm run tauri build` produces an installer.
 - **Done when:** tests pass, the scratch-repo E2E round-trips a commit to the bare remote, and the release build installs and runs from the tray.
+
+### Scope for Phases 6–10: the VS Code source-control feature set
+- **Goal:** everything in VS Code's Source Control guide that is plain git, in a tray-sized UI.
+- **Out of scope:**
+  - GitHub pull requests and issues. These need `gh` or the GitHub API, and git stays the only external program.
+  - Other version control systems (SVN, Mercurial).
+  - A full 3-way merge editor. Per-conflict-block resolution in the diff pane replaces it (Phase 9).
+
+### Phase 6: Rust git layer, staging model, diffs, expanded window, sync actions
+- All git logic moved from TS to Rust (`src-tauri/src/git/`) behind named commands. The shell plugin is removed.
+- Status parsed into staged / unstaged / conflicted lists. Stage, unstage, discard (with a confirm dialog), and Stage/Unstage/Discard All.
+- Diff pane in the expanded window (`set_expanded`).
+- Commit split button (Commit & Push / Commit, and Amend). Smart commit stages everything when nothing is staged. Amending a pushed commit asks first and force-pushes with lease.
+- Fetch / Pull / Push / Sync / Publish from the header menu and the ahead/behind text.
+- **Done when:** tests pass (parser, ops against real git, diff parser, commit flows including amend), and the preview shows staged/unstaged sections and a diff.
+
+### Phase 7: Tabs, branches, stashes, tags, remotes
+- A tab strip in the compact column: **Changes · History · Branches · Stashes**.
+- Branches: list local and remote branches with ahead/behind. Create (from HEAD or any ref), switch, rename, delete (confirm; force only after a second confirm), merge into current, rebase current onto, and publish.
+- Stashes: Stash / Stash (include untracked) / Stash staged (git ≥ 2.35). List, view the diff, apply, pop, drop, and drop all (confirm).
+- Tags: create (lightweight or annotated), delete, push. Remotes: list, add, remove, fetch one.
+- **Done when:** each operation has a live-git test and a preview scenario.
+
+### Phase 8: History and recovery
+- History tab: `git log --graph`-style lane graph (computed in Rust from `--format=%H %P …`), paged 200 at a time, with incoming/outgoing markers.
+- Commit detail in the expanded pane: message, author, files, and a per-file diff. Compare any two commits (select two), or a commit with the working tree.
+- Commit actions: revert, cherry-pick, reset (soft / mixed / hard, with hard behind a confirm), create a branch or tag here, and copy the hash.
+- File timeline (`log --follow -- <path>`) and blame (`blame --porcelain`) from a file's diff pane.
+- **Done when:** the graph layout and blame parser are unit-tested, and the actions have live-git tests.
+
+### Phase 9: Conflicts, partial staging, worktrees, repo setup
+- Conflicts: a Merge Changes view with per-block **Accept Current / Incoming / Both** in the diff pane. Mark resolved (stage it). **Continue / Abort** for merge, rebase, cherry-pick and revert, which replaces the "finish in your editor" banner.
+  - Writing a resolved file is a small Rust command scoped to paths inside the selected repo.
+- Partial staging: stage, unstage or discard a hunk or a selection of lines from the diff pane.
+  - Uses `git apply --cached [--reverse]` with the patch on stdin (`run_with_input`), built in Rust from the parsed hunks.
+- Worktrees: list, add (new or existing branch), remove (confirm), and open a worktree as the selected repo.
+- Repo setup: **Init** a non-repo folder, **Clone** a URL into a picked folder (with progress), and **Add to .gitignore** from a file's menu.
+- A pre-commit **secrets check** on staged files (`.env*`, key/token patterns). It warns, it never blocks.
+- **Done when:** the patch builder and conflict-block parser are unit-tested, and the flows have live-git tests.
+
+### Phase 10: Polish and release
+- Keyboard navigation for lists and menus, empty/loading/error states for every tab, and a preview scenario per tab.
+- Performance on big repos: virtualized lists, capped diffs.
+- **Done when:** `npm test`, `npm run typecheck` and `cargo test` pass, and `npm run tauri build` produces an installer that runs from the tray.

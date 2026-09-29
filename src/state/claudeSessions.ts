@@ -1,54 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
-import { resolveRepo, samePath } from "../git/repo";
-import type { GitRunner } from "../git/runGit";
-import type { ClaudeSessionRepo, RepoRef } from "../git/types";
+import { samePath } from "../git/repo";
+import type { ClaudeSessionRepo } from "../git/types";
 
 /** A session log written this recently means Claude is actively working in that repo. */
 export const CLAUDE_ACTIVE_MS = 90_000;
-
-export interface RawSession {
-  cwd: string;
-  sessionId: string;
-  lastActiveMs: number;
-}
-
-export interface ClaudeRepos {
-  /** Repos with a Claude session in the last 24 h, most recently active first. */
-  repos: ClaudeSessionRepo[];
-  /** Session folders that aren't inside a git repo. */
-  nonRepos: RawSession[];
-}
-
-export const fetchSessions = () => invoke<RawSession[]>("detect_claude_sessions");
-
-// cwd → repo root. Only successes are cached: a folder can become a repo later.
-const rootCache = new Map<string, RepoRef>();
-
-/** Maps session cwds to repo roots and merges sessions that share a repo. */
-export async function claudeRepos(run: GitRunner, sessions: RawSession[]): Promise<ClaudeRepos> {
-  const resolved = await Promise.all(
-    sessions.map(async (s) => {
-      const cached = rootCache.get(s.cwd);
-      if (cached) return cached;
-      const r = await resolveRepo(run, s.cwd);
-      if (!r.ok) return null;
-      rootCache.set(s.cwd, r.repo);
-      return r.repo;
-    }),
-  );
-
-  const repos: ClaudeSessionRepo[] = [];
-  const nonRepos: RawSession[] = [];
-  sessions.forEach((s, i) => {
-    const repo = resolved[i];
-    if (!repo) return void nonRepos.push(s);
-    const existing = repos.find((r) => samePath(r.path, repo.path));
-    if (!existing) repos.push({ ...repo, lastActiveMs: s.lastActiveMs });
-    else existing.lastActiveMs = Math.max(existing.lastActiveMs, s.lastActiveMs);
-  });
-  repos.sort((a, b) => b.lastActiveMs - a.lastActiveMs);
-  return { repos, nonRepos };
-}
 
 export function isClaudeActive(repoPath: string | null, repos: ClaudeSessionRepo[], now = Date.now()): boolean {
   if (!repoPath) return false;

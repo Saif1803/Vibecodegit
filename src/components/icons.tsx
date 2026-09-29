@@ -120,3 +120,62 @@ export const CheckCircleIcon = (p: P) => (
     <path d="m5.5 8.25 1.75 1.75 3.25-3.5" />
   </Icon>
 );
+
+export const PlusIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M8 3.5v9M3.5 8h9" />
+  </Icon>
+);
+
+export const MinusIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M3.5 8h9" />
+  </Icon>
+);
+
+/** Discard: an arrow curling back. */
+export const UndoIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M4.5 6.5h5.25a3 3 0 0 1 0 6H7" />
+    <path d="M6.5 4 4 6.5 6.5 9" />
+  </Icon>
+);
+
+export const MoreIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M3.5 8h.01M8 8h.01M12.5 8h.01" strokeWidth={2.2} />
+  </Icon>
+);
+
+export const ArrowDownIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M8 3v10M4 9l4 4 4-4" />
+  </Icon>
+);
+
+export const SyncIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M13 6.5A5 5 0 0 0 3.6 5M3 9.5A5 5 0 0 0 12.4 11" />
+    <path d="M13.25 3v3.5h-3.5M2.75 13V9.5h3.5" />
+  </Icon>
+);
+
+export const CloudDownIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M4.5 11.5a3 3 0 0 1-.4-5.97A4 4 0 0 1 11.9 5.5a2.75 2.75 0 0 1 .6 5.44" />
+    <path d="M8 8v5.5M6 11.5l2 2 2-2" />
+  </Icon>
+);
+
+export const FileIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M4 2.5h5l3 3v8a.5.5 0 0 1-.5.5h-7.5a.5.5 0 0 1-.5-.5v-10.5a.5.5 0 0 1 .5-.5z" />
+    <path d="M9 2.5v3h3" />
+  </Icon>
+);
+
+export const PencilIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M10.5 3 13 5.5l-7 7H3.5V10z" />
+  </Icon>
+);

@@ -1,4 +1,6 @@
 mod claude;
+mod commands;
+mod git;
 mod placement;
 mod taskbar;
 
@@ -15,6 +17,9 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 const MAIN: &str = "main";
 const TRAY: &str = "tray";
 const EDGE_MARGIN: i32 = 12;
+/// Logical sizes: the tray popup, and with a detail pane (diff, commit, graph) open.
+const COMPACT: (f64, f64) = (380.0, 500.0);
+const EXPANDED: (f64, f64) = (960.0, 640.0);
 /// A tray click this soon after a blur-hide is the same click that caused the blur,
 /// so it should leave the window hidden rather than re-open it.
 const BLUR_CLICK_GRACE: Duration = Duration::from_millis(400);
@@ -68,13 +73,21 @@ fn position_near_tray(app: &AppHandle, window: &WebviewWindow) -> tauri::Result<
         work = exclude_bar(work, bar);
     }
 
+    // The expanded size can exceed a small screen: shrink to fit the work area.
     let size = window.outer_size()?;
-    let (x, y) = place(work, tray, size.width as i32, size.height as i32, EDGE_MARGIN);
+    let w = (size.width as i32).min(work.w - 2 * EDGE_MARGIN);
+    let h = (size.height as i32).min(work.h - 2 * EDGE_MARGIN);
+    if (w, h) != (size.width as i32, size.height as i32) {
+        window.set_size(tauri::PhysicalSize::new(w as u32, h as u32))?;
+    }
+    let (x, y) = place(work, tray, w, h, EDGE_MARGIN);
     window.set_position(tauri::PhysicalPosition::new(x, y))
 }
 
 fn show(app: &AppHandle) {
     let Some(window) = main_window(app) else { return };
+    // Every show starts compact; the webview closes its detail pane on hide.
+    let _ = window.set_size(tauri::LogicalSize::new(COMPACT.0, COMPACT.1));
     if let Err(e) = position_near_tray(app, &window) {
         eprintln!("positioning failed: {e}");
     }
@@ -144,15 +157,13 @@ fn on_tray_click(app: &AppHandle) {
     }
 }
 
-/// Recent Claude Code sessions (newest first) with their working directories.
+/// Widens the popup for a detail pane (or shrinks it back), keeping it next to the tray.
 #[tauri::command]
-async fn detect_claude_sessions(app: AppHandle) -> Result<Vec<claude::ClaudeSession>, String> {
-    let home = app.path().home_dir().map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        claude::scan(&claude::projects_dir(&home), std::time::SystemTime::now(), claude::MAX_AGE)
-    })
-    .await
-    .map_err(|e| e.to_string())
+fn set_expanded(app: AppHandle, expanded: bool) -> Result<(), String> {
+    let window = main_window(&app).ok_or("main window missing")?;
+    let (w, h) = if expanded { EXPANDED } else { COMPACT };
+    window.set_size(tauri::LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
+    position_near_tray(&app, &window).map_err(|e| e.to_string())
 }
 
 /// Lets the frontend suspend hide-on-blur while a native dialog is open.
@@ -166,7 +177,6 @@ pub fn run() {
     tauri::Builder::default()
         // Must be registered first: a second launch just surfaces the existing window.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show(app)))
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(
@@ -179,7 +189,23 @@ pub fn run() {
                 .build(),
         )
         .manage(WindowState { blur_hide: AtomicBool::new(true), ..Default::default() })
-        .invoke_handler(tauri::generate_handler![set_blur_hide, detect_claude_sessions, hide_window])
+        .invoke_handler(tauri::generate_handler![
+            set_blur_hide,
+            set_expanded,
+            hide_window,
+            commands::resolve_repo,
+            commands::claude_repos,
+            commands::git_status,
+            commands::stage,
+            commands::stage_all,
+            commands::unstage,
+            commands::unstage_all,
+            commands::discard,
+            commands::file_diff,
+            commands::is_head_published,
+            commands::commit_push,
+            commands::sync,
+        ])
         .setup(|app| {
             let show_item = MenuItem::with_id(app, "show", "Show  (Ctrl+Shift+G)", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit ClaudeGit", true, None::<&str>)?;

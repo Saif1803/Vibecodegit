@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { resolveRepo, samePath } from "../git/repo";
-import { tauriGit, type GitRunner } from "../git/runGit";
-import { getStatus, type RepoStatus } from "../git/status";
-import type { RepoRef } from "../git/types";
-import { autoSelect, claudeRepos, fetchSessions, type ClaudeRepos } from "./claudeSessions";
+import * as api from "../git/api";
+import { samePath } from "../git/repo";
+import type { ClaudeRepos, RepoRef, RepoStatus } from "../git/types";
+import { autoSelect } from "./claudeSessions";
 import { pickFolder } from "./pickFolder";
 import { loadRecent, pruneRecent, rememberRepo } from "./recentRepos";
-import { reconcileSelection } from "./selection";
 
 export interface RepoState {
   repo: RepoRef | null;
   status: RepoStatus | null;
-  selected: Set<string>;
   recent: RepoRef[];
   claude: ClaudeRepos;
   loading: boolean;
@@ -21,16 +18,15 @@ export interface RepoState {
   notice: string | null;
 }
 
-const EMPTY_CLAUDE: ClaudeRepos = { repos: [], nonRepos: [] };
+const EMPTY_CLAUDE: ClaudeRepos = { repos: [], nonRepos: [], newestSessionId: null };
 /** How often Claude activity is re-checked while the popup is visible. */
 export const CLAUDE_POLL_MS = 5_000;
 
 /** All repo/Claude state for the popup. Refreshes on each show; polls Claude only while `visible`. */
-export function useRepoState(visible: boolean, busy = false, run: GitRunner = tauriGit) {
+export function useRepoState(visible: boolean, busy = false) {
   const [state, setState] = useState<RepoState>({
     repo: null,
     status: null,
-    selected: new Set(),
     recent: [],
     claude: EMPTY_CLAUDE,
     loading: true,
@@ -61,24 +57,21 @@ export function useRepoState(visible: boolean, busy = false, run: GitRunner = ta
       const sameRepo = prev.repo && prev.status && samePath(prev.repo.path, repo.path);
       patch({ repo, loading: true, ...(sameRepo ? {} : { status: null, error: null }) });
       try {
-        const status = await getStatus(run, repo.path);
+        const status = await api.getStatus(repo.path);
         if (token !== request.current) return;
-        const cur = latest.current;
-        const selected = sameRepo ? reconcileSelection(cur.selected, cur.status?.files ?? null, status.files) : reconcileSelection(null, null, status.files);
-        patch({ status, selected, loading: false, error: null });
+        patch({ status, loading: false, error: null });
       } catch (e) {
         if (token !== request.current) return;
-        const check = await resolveRepo(run, repo.path);
-        patch({ status: null, selected: new Set(), loading: false, error: check.ok ? String((e as Error).message ?? e) : check.message });
+        const check = await api.resolveRepo(repo.path).catch(() => null);
+        patch({ status: null, loading: false, error: check && !check.ok ? check.message : api.errorText(e) });
       }
     },
-    [run, patch],
+    [patch],
   );
 
   /** Re-detect Claude sessions, apply the auto-select rule, and reload status. */
   const refresh = useCallback(async () => {
-    const [sessions, recent] = await Promise.all([fetchSessions().catch(() => []), loadRecent().catch(() => [])]);
-    const claude = await claudeRepos(run, sessions);
+    const [claude, recent] = await Promise.all([api.claudeRepos().catch(() => EMPTY_CLAUDE), loadRecent().catch(() => [])]);
     const current = latest.current.repo;
     const decision = autoSelect(current?.path ?? null, claude.repos[0]?.path ?? null, lastAuto.current, recent[0]?.path ?? null);
     lastAuto.current = decision.lastAuto;
@@ -86,17 +79,16 @@ export function useRepoState(visible: boolean, busy = false, run: GitRunner = ta
     const pool: RepoRef[] = [...claude.repos, ...recent, ...(current ? [current] : [])];
     const target = decision.select ? pool.find((r) => samePath(r.path, decision.select!)) ?? null : null;
 
-    const newest = sessions[0];
-    const claudeOutsideRepo = newest && claude.nonRepos.some((s) => s.sessionId === newest.sessionId);
+    const outside = claude.nonRepos.find((s) => s.sessionId === claude.newestSessionId);
     patch({
       claude,
       recent,
-      ...(claudeOutsideRepo ? { notice: `Claude is working in ${newest.cwd}, which isn't a git repository.` } : {}),
+      ...(outside ? { notice: `Claude is working in ${outside.cwd}, which isn't a git repository.` } : {}),
     });
 
     if (target) await loadStatus(target);
     else patch({ loading: false });
-  }, [run, patch, loadStatus]);
+  }, [patch, loadStatus]);
 
   const selectRepo = useCallback(
     async (repo: RepoRef) => {
@@ -111,27 +103,10 @@ export function useRepoState(visible: boolean, busy = false, run: GitRunner = ta
   const browse = useCallback(async () => {
     const folder = await pickFolder();
     if (!folder) return;
-    const r = await resolveRepo(run, folder);
+    const r = await api.resolveRepo(folder);
     if (r.ok) await selectRepo(r.repo);
     else patch({ notice: r.message });
-  }, [run, selectRepo, patch]);
-
-  const toggle = useCallback(
-    (path: string, checked: boolean) =>
-      setState((s) => {
-        const selected = new Set(s.selected);
-        if (checked) selected.add(path);
-        else selected.delete(path);
-        return { ...s, selected };
-      }),
-    [],
-  );
-
-  const toggleAll = useCallback(
-    (checked: boolean) =>
-      setState((s) => ({ ...s, selected: new Set(checked ? (s.status?.files ?? []).map((f) => f.path) : []) })),
-    [],
-  );
+  }, [selectRepo, patch]);
 
   const dismissNotice = useCallback(() => {
     if (latest.current.notice) dismissed.current.add(latest.current.notice);
@@ -140,9 +115,9 @@ export function useRepoState(visible: boolean, busy = false, run: GitRunner = ta
 
   // Claude activity only; the repo selection is left alone between shows.
   const pollClaude = useCallback(async () => {
-    const sessions = await fetchSessions().catch(() => null);
-    if (sessions) patch({ claude: await claudeRepos(run, sessions) });
-  }, [run, patch]);
+    const claude = await api.claudeRepos().catch(() => null);
+    if (claude) patch({ claude });
+  }, [patch]);
 
   /** Refresh button: re-read the current repo and Claude activity, without auto-switching. */
   const reload = useCallback(async () => {
@@ -150,7 +125,27 @@ export function useRepoState(visible: boolean, busy = false, run: GitRunner = ta
     await Promise.all([pollClaude(), repo ? loadStatus(repo) : Promise.resolve()]);
   }, [pollClaude, loadStatus]);
 
-  /** After Commit & Push: the repo counts as recent, and its status changed. */
+  /**
+   * Run a git operation on the current repo, then re-read status whatever happened.
+   * Returns git's error message on failure, or null.
+   */
+  const mutate = useCallback(
+    async (op: (repo: string) => Promise<unknown>): Promise<string | null> => {
+      const repo = latest.current.repo;
+      if (!repo) return null;
+      let failure: string | null = null;
+      try {
+        await op(repo.path);
+      } catch (e) {
+        failure = api.errorText(e);
+      }
+      await loadStatus(repo);
+      return failure;
+    },
+    [loadStatus],
+  );
+
+  /** After a commit: the repo counts as recent, and its status changed. */
   const afterCommit = useCallback(async () => {
     const repo = latest.current.repo;
     if (!repo) return;
@@ -165,7 +160,7 @@ export function useRepoState(visible: boolean, busy = false, run: GitRunner = ta
     const shownNow = visible && !wasVisible.current;
     wasVisible.current = visible;
     if (!visible) return;
-    // Don't re-select or re-read the repo under a running Commit & Push.
+    // Don't re-select or re-read the repo under a running operation.
     if (shownNow && !busy) void refresh();
     const timer = window.setInterval(() => void pollClaude(), CLAUDE_POLL_MS);
     return () => window.clearInterval(timer);
@@ -177,7 +172,7 @@ export function useRepoState(visible: boolean, busy = false, run: GitRunner = ta
     (async () => {
       // Once per launch: drop recent repos that were deleted or moved.
       const recent = await loadRecent().catch(() => []);
-      const { removed } = await pruneRecent(run, recent).catch(() => ({ removed: [] }));
+      const { removed } = await pruneRecent(recent).catch(() => ({ removed: [] as RepoRef[] }));
       if (!disposed && removed.length > 0) {
         patch({ notice: `Removed ${removed.map((r) => r.name).join(", ")} from recent repos (no longer found).` });
       }
@@ -186,7 +181,7 @@ export function useRepoState(visible: boolean, busy = false, run: GitRunner = ta
     return () => {
       disposed = true;
     };
-  }, [run, refresh, patch]);
+  }, [refresh, patch]);
 
-  return { ...state, refresh, reload, afterCommit, selectRepo, browse, toggle, toggleAll, dismissNotice };
+  return { ...state, refresh, reload, mutate, afterCommit, selectRepo, browse, dismissNotice };
 }

@@ -1,11 +1,11 @@
-import { STEPS, type Step, type StepState } from "../git/commitPush";
+import type { Step, StepState } from "../git/types";
 import { CheckIcon, SpinnerIcon, XIcon } from "./icons";
 
-/** "add · commit · pull · push" with each step's live state. */
-export function StepProgress({ steps }: { steps: Partial<Record<Step, StepState>> }) {
+/** "stage · commit · pull · push" (only the steps this run uses) with each step's live state. */
+export function StepProgress({ order, steps }: { order: Step[]; steps: Partial<Record<Step, StepState>> }) {
   return (
     <ol className="flex min-w-0 items-center gap-1 pl-1 text-[11px]" aria-label="Commit progress">
-      {STEPS.map((name, i) => {
+      {order.map((name, i) => {
         const state = steps[name];
         return (
           <li key={name} className="flex items-center gap-1">

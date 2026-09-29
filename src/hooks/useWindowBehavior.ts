@@ -28,3 +28,8 @@ export function useWindowBehavior() {
 
   return visible;
 }
+
+/** Widen the popup for the detail pane, or shrink it back (Rust keeps it next to the tray). */
+export function setExpanded(expanded: boolean) {
+  invoke("set_expanded", { expanded }).catch(() => {});
+}
