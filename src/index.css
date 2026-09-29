@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  @apply bg-white text-zinc-900 antialiased select-none dark:bg-zinc-900 dark:text-zinc-100;
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
