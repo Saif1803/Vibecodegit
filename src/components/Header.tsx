@@ -1,13 +1,15 @@
-import type { ClaudeSessionRepo, RepoRef, SyncKind } from "../git/types";
+import type { AgentSessionRepo, RepoRef, SyncKind } from "../git/types";
 import { dragWindow } from "../hooks/dragWindow";
 import { ArrowDownIcon, ArrowUpIcon, BranchIcon, CloudDownIcon, MoreIcon, RefreshIcon, SyncIcon } from "./icons";
+import { Logo } from "./Logo";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { RepoPicker } from "./RepoPicker";
+import { ShortcutEditor } from "./ShortcutEditor";
 
 interface Props {
   repo: RepoRef | null;
   branch: string | null;
-  active: ClaudeSessionRepo[];
+  active: AgentSessionRepo[];
   recent: RepoRef[];
   onSelectRepo: (repo: RepoRef) => void;
   onBrowse: () => void;
@@ -26,6 +28,7 @@ const ICON_BUTTON =
 export function Header(p: Props) {
   return (
     <header onMouseDown={dragWindow} className="flex h-12 shrink-0 items-center gap-1.5 px-2.5">
+      <Logo size={20} className="ml-1" />
       <RepoPicker current={p.repo} active={p.active} recent={p.recent} onSelect={p.onSelectRepo} onBrowse={p.onBrowse} />
       {p.repo && p.branch !== null && (
         <button
@@ -41,7 +44,7 @@ export function Header(p: Props) {
       <button type="button" onClick={p.onRefresh} disabled={!p.repo} title="Refresh" aria-label="Refresh" className={`ml-auto ${ICON_BUTTON}`}>
         <RefreshIcon className={p.refreshing ? "animate-spin" : undefined} />
       </button>
-      <Menu label="More actions" trigger={<MoreIcon />} disabled={!p.repo} className={ICON_BUTTON}>
+      <Menu label="More actions" trigger={<MoreIcon />} className={ICON_BUTTON}>
         {(close) => {
           const item = (kind: SyncKind) => () => {
             close();
@@ -62,6 +65,8 @@ export function Header(p: Props) {
               <MenuItem icon={<CloudDownIcon />} disabled={!p.canSync} onClick={item("fetch")} hint="all remotes">
                 Fetch
               </MenuItem>
+              <MenuSeparator />
+              <ShortcutEditor />
             </>
           );
         }}

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../git/api";
 import { samePath } from "../git/repo";
-import type { ClaudeRepos, RepoRef, RepoStatus } from "../git/types";
-import { autoSelect } from "./claudeSessions";
+import type { AgentRepos, RepoRef, RepoStatus } from "../git/types";
+import { autoSelect } from "./agentSessions";
 import { pickFolder } from "./pickFolder";
 import { loadRecent, pruneRecent, rememberRepo } from "./recentRepos";
 
@@ -10,25 +10,25 @@ export interface RepoState {
   repo: RepoRef | null;
   status: RepoStatus | null;
   recent: RepoRef[];
-  claude: ClaudeRepos;
+  agents: AgentRepos;
   loading: boolean;
   /** Blocking problem with the current repo (status failed). */
   error: string | null;
-  /** Dismissible information (pruned repos, invalid folder picked, Claude outside a repo). */
+  /** Dismissible information (pruned repos, invalid folder picked, agent outside a repo). */
   notice: string | null;
 }
 
-const EMPTY_CLAUDE: ClaudeRepos = { repos: [], nonRepos: [], newestSessionId: null };
-/** How often Claude activity is re-checked while the popup is visible. */
-export const CLAUDE_POLL_MS = 5_000;
+const EMPTY_AGENTS: AgentRepos = { repos: [], nonRepos: [], newestSessionId: null };
+/** How often agent activity is re-checked while the popup is visible. */
+export const AGENT_POLL_MS = 5_000;
 
-/** All repo/Claude state for the popup. Refreshes on each show; polls Claude only while `visible`. */
+/** All repo/agent state for the popup. Refreshes on each show; polls while `visible`. */
 export function useRepoState(visible: boolean, busy = false) {
   const [state, setState] = useState<RepoState>({
     repo: null,
     status: null,
     recent: [],
-    claude: EMPTY_CLAUDE,
+    agents: EMPTY_AGENTS,
     loading: true,
     error: null,
     notice: null,
@@ -39,7 +39,7 @@ export function useRepoState(visible: boolean, busy = false) {
   const lastAuto = useRef<string | null>(null);
   const request = useRef(0);
 
-  // Notices the user closed stay closed (e.g. "Claude is in a non-repo folder" on every show).
+  // Notices the user closed stay closed (e.g. an agent outside a repo).
   const dismissed = useRef(new Set<string>());
 
   const patch = useCallback((p: Partial<RepoState>) => {
@@ -69,21 +69,21 @@ export function useRepoState(visible: boolean, busy = false) {
     [patch],
   );
 
-  /** Re-detect Claude sessions, apply the auto-select rule, and reload status. */
+  /** Re-detect agent sessions, apply the auto-select rule, and reload status. */
   const refresh = useCallback(async () => {
-    const [claude, recent] = await Promise.all([api.claudeRepos().catch(() => EMPTY_CLAUDE), loadRecent().catch(() => [])]);
+    const [agents, recent] = await Promise.all([api.agentRepos().catch(() => EMPTY_AGENTS), loadRecent().catch(() => [])]);
     const current = latest.current.repo;
-    const decision = autoSelect(current?.path ?? null, claude.repos[0]?.path ?? null, lastAuto.current, recent[0]?.path ?? null);
+    const decision = autoSelect(current?.path ?? null, agents.repos[0]?.path ?? null, lastAuto.current, recent[0]?.path ?? null);
     lastAuto.current = decision.lastAuto;
 
-    const pool: RepoRef[] = [...claude.repos, ...recent, ...(current ? [current] : [])];
+    const pool: RepoRef[] = [...agents.repos, ...recent, ...(current ? [current] : [])];
     const target = decision.select ? pool.find((r) => samePath(r.path, decision.select!)) ?? null : null;
 
-    const outside = claude.nonRepos.find((s) => s.sessionId === claude.newestSessionId);
+    const outside = agents.nonRepos.find((s) => s.sessionId === agents.newestSessionId);
     patch({
-      claude,
+      agents,
       recent,
-      ...(outside ? { notice: `Claude is working in ${outside.cwd}, which isn't a git repository.` } : {}),
+      ...(outside ? { notice: `${outside.agent} is working in ${outside.cwd}, which isn't a git repository.` } : {}),
     });
 
     if (target) await loadStatus(target);
@@ -113,17 +113,17 @@ export function useRepoState(visible: boolean, busy = false) {
     patch({ notice: null });
   }, [patch]);
 
-  // Claude activity only; the repo selection is left alone between shows.
-  const pollClaude = useCallback(async () => {
-    const claude = await api.claudeRepos().catch(() => null);
-    if (claude) patch({ claude });
+  // Agent activity only; the repo selection is left alone between shows.
+  const pollAgents = useCallback(async () => {
+    const agents = await api.agentRepos().catch(() => null);
+    if (agents) patch({ agents });
   }, [patch]);
 
-  /** Refresh button: re-read the current repo and Claude activity, without auto-switching. */
+  /** Refresh button: re-read the current repo and agent activity, without auto-switching. */
   const reload = useCallback(async () => {
     const repo = latest.current.repo;
-    await Promise.all([pollClaude(), repo ? loadStatus(repo) : Promise.resolve()]);
-  }, [pollClaude, loadStatus]);
+    await Promise.all([pollAgents(), repo ? loadStatus(repo) : Promise.resolve()]);
+  }, [pollAgents, loadStatus]);
 
   /**
    * Run a git operation on the current repo, then re-read status whatever happened.
@@ -154,7 +154,7 @@ export function useRepoState(visible: boolean, busy = false) {
     await loadStatus(repo);
   }, [patch, loadStatus]);
 
-  // Refresh on each show, then poll Claude activity until hidden.
+  // Refresh on each show, then poll agent activity until hidden.
   const wasVisible = useRef(false);
   useEffect(() => {
     const shownNow = visible && !wasVisible.current;
@@ -162,9 +162,9 @@ export function useRepoState(visible: boolean, busy = false) {
     if (!visible) return;
     // Don't re-select or re-read the repo under a running operation.
     if (shownNow && !busy) void refresh();
-    const timer = window.setInterval(() => void pollClaude(), CLAUDE_POLL_MS);
+    const timer = window.setInterval(() => void pollAgents(), AGENT_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [visible, busy, refresh, pollClaude]);
+  }, [visible, busy, refresh, pollAgents]);
 
   // Preload at launch so the first show is instant.
   useEffect(() => {

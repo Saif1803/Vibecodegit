@@ -1,6 +1,6 @@
 // Dev-only design preview: renders the real App in a plain browser with the Rust commands mocked
 // by an in-memory fake repo. Open /preview.html?s=<scenario> on the Vite dev server.
-// Scenarios: normal | claude | blocked | conflict | pushfail | clean | norepo | unborn | ahead | secrets | icons
+// Scenarios: normal | history | branches | tags | stashes | clean | blocked | conflict | pushfail | norepo | unborn | ahead | secrets | icons | empty_history | empty_branches | empty_tags | empty_stashes
 import { emit } from "@tauri-apps/api/event";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import React from "react";
@@ -161,7 +161,11 @@ let stashes = [
   { index: 0, hash: "aaaa1111", dateMs: Date.now() - 20 * 60_000, message: "before trying the new placement math", branch: "main" },
   { index: 1, hash: "bbbb2222", dateMs: Date.now() - 30 * HOUR, message: "WIP on feature/branch-picker: 91be0c4 Branch list", branch: "feature/branch-picker" },
 ];
+if (scenario === "empty_branches") branches = [];
+if (scenario === "empty_tags") tags = [];
+if (scenario === "empty_stashes") stashes = [];
 const reindex = () => (stashes = stashes.map((s, index) => ({ ...s, index })));
+let mockShortcut = "Ctrl+Shift+G";
 
 function branchCmd(cmd: string, p: Record<string, unknown>) {
   switch (cmd) {
@@ -290,7 +294,8 @@ function mockLayout(list: MockCommit[]): GraphRow[] {
 }
 
 function mockHistory(limit: number) {
-  const list = MOCK_COMMITS.slice(0, limit);
+  const all = scenario === "empty_history" ? [] : MOCK_COMMITS;
+  const list = all.slice(0, limit);
   const rows = mockLayout(list);
   return {
     commits: list.map((c, i) => ({
@@ -306,7 +311,7 @@ function mockHistory(limit: number) {
       outgoing: !!c.outgoing,
       graph: rows[i],
     })),
-    more: MOCK_COMMITS.length > limit,
+    more: all.length > limit,
     upstream: "origin/main",
   };
 }
@@ -454,11 +459,11 @@ mockIPC(
     const other = branchCmd(cmd, p) ?? historyCmd(cmd, p) ?? loopCmd(cmd, p);
     if (other !== undefined) return other;
     switch (cmd) {
-      case "claude_repos":
+      case "agent_repos":
         return scenario === "norepo"
           ? { repos: [], nonRepos: [], newestSessionId: null }
           : {
-              repos: [{ path: ROOT, name: "ClaudeGit", lastActiveMs: Date.now() - (scenario === "claude" ? 15_000 : 20 * 60_000) }],
+              repos: [{ path: ROOT, name: "ClaudeGit", agents: [{ name: scenario === "claude" ? "Claude Code" : "Codex", lastActiveMs: Date.now() - (scenario === "claude" ? 15_000 : 20 * 60_000) }], lastActiveMs: Date.now() - (scenario === "claude" ? 15_000 : 20 * 60_000) }],
               nonRepos: [],
               newestSessionId: "s1",
             };
@@ -498,6 +503,11 @@ mockIPC(
       }
       case "sync":
         return sync(p.kind as SyncKind);
+      case "get_shortcut":
+        return mockShortcut;
+      case "set_shortcut":
+        mockShortcut = p.shortcut as string;
+        return null;
       case "plugin:store|load":
         return 1;
       case "plugin:store|get":
@@ -510,9 +520,22 @@ mockIPC(
 );
 
 initTheme();
+
+const TAB_SCENARIOS: Record<string, "changes" | "history" | "branches" | "tags" | "stashes"> = {
+  history: "history",
+  empty_history: "history",
+  branches: "branches",
+  empty_branches: "branches",
+  tags: "tags",
+  empty_tags: "tags",
+  stashes: "stashes",
+  empty_stashes: "stashes",
+};
+const initialTab = TAB_SCENARIOS[scenario] ?? "changes";
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <App initialTab={initialTab} />
   </React.StrictMode>,
 );
 // The popup only loads and focuses once it's "shown".

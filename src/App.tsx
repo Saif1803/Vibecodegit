@@ -10,7 +10,8 @@ import { DiffView } from "./components/DiffView";
 import { BlameView, TimelineView } from "./components/FileHistoryViews";
 import { Header } from "./components/Header";
 import { HistoryPanel } from "./components/HistoryPanel";
-import { AlertIcon, CheckCircleIcon, FolderPlusIcon, SpinnerIcon } from "./components/icons";
+import { AlertIcon, CheckCircleIcon, SpinnerIcon } from "./components/icons";
+import { Logo } from "./components/Logo";
 import type { PanelOps } from "./components/ListParts";
 import { PromptDialog, type PromptRequest } from "./components/PromptDialog";
 import { StashesPanel, type StashActions } from "./components/StashesPanel";
@@ -18,6 +19,7 @@ import { StashView } from "./components/StashView";
 import { StatusBar } from "./components/StatusBar";
 import { Tabs, type TabId } from "./components/Tabs";
 import { TagsPanel } from "./components/TagsPanel";
+import { ago } from "./lib/time";
 import * as api from "./git/api";
 import type {
   ChangeSide,
@@ -35,7 +37,7 @@ import type {
 } from "./git/types";
 import { setExpanded, useWindowBehavior } from "./hooks/useWindowBehavior";
 import { samePath } from "./git/repo";
-import { isClaudeActive } from "./state/claudeSessions";
+import { activeAgents } from "./state/agentSessions";
 import { useRepoState } from "./state/useRepoState";
 
 type Notice = { tone: "info" | "warning" | "success"; text: string };
@@ -60,8 +62,16 @@ function readAction(): CommitAction {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+const workingLabel = (names: string[]) => {
+  const displayNames = names.map((name) => (name === "Claude Code" ? "Claude" : name));
+  if (displayNames.length === 1) return `${displayNames[0]} is working here`;
+  const joined = displayNames.length === 2
+    ? `${displayNames[0]} and ${displayNames[1]}`
+    : `${displayNames.slice(0, -1).join(", ")}, and ${displayNames.at(-1)}`;
+  return `${joined} are working here`;
+};
 
-export default function App() {
+export default function App({ initialTab }: { initialTab?: TabId } = {}) {
   const visible = useWindowBehavior();
   const [busy, setBusy] = useState(false);
   const [committing, setCommitting] = useState(false);
@@ -78,7 +88,7 @@ export default function App() {
   const [diffError, setDiffError] = useState<string | null>(null);
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   const [promptReq, setPromptReq] = useState<PromptRequest | null>(null);
-  const [tab, setTab] = useState<TabId>("changes");
+  const [tab, setTab] = useState<TabId>(initialTab ?? "changes");
   const [prompts, setPrompts] = useState<ClaudePrompt[]>([]);
   const input = useRef<HTMLTextAreaElement>(null);
 
@@ -88,7 +98,11 @@ export default function App() {
   const unstaged = st?.unstaged ?? [];
   const conflicted = st?.conflicted ?? [];
   const blocker = st?.blocker ?? null;
-  const claudeActive = isClaudeActive(repo, s.claude.repos);
+  const workingAgents = activeAgents(repo, s.agents.repos);
+  const repoAgentActivity = s.agents.repos.find((r) => repo && samePath(r.path, repo))?.agents ?? [];
+  const activityLabels = repoAgentActivity.map((agent) =>
+    workingAgents.includes(agent.name) ? `${agent.name} working` : `${agent.name} · ${ago(agent.lastActiveMs)} ago`,
+  );
   const hasCommits = st?.branch.hasCommits ?? false;
   // VS Code's smart commit: with nothing staged, commit every change.
   const stageAll = !amend && staged.length === 0 && unstaged.length > 0;
@@ -323,11 +337,11 @@ export default function App() {
 
   const ignore = (file: FileChange) => void run((r) => api.addToGitignore(r, file.path), `Added /${file.path} to .gitignore.`);
 
-  /** Button and Ctrl+Enter: ask first while Claude is editing this repo. */
+  /** Button and Ctrl+Enter: ask first while an agent is active in this repo. */
   const requestCommit = () => {
     if (confirming) return void commit();
     if (!canCommit) return;
-    if (claudeActive) setConfirming(true);
+    if (workingAgents.length > 0) setConfirming(true);
     else void commit();
   };
 
@@ -419,7 +433,7 @@ export default function App() {
 
   // Your Claude prompts since the last commit: re-read after each status load (a commit moves
   // "since") and whenever Claude's session log for this repo is written.
-  const claudeWrote = s.claude.repos.find((r) => repo && samePath(r.path, repo))?.lastActiveMs ?? 0;
+  const claudeWrote = s.agents.repos.find((r) => repo && samePath(r.path, repo))?.lastActiveMs ?? 0;
   useEffect(() => {
     if (!repo || !visible) return;
     let stale = false;
@@ -437,12 +451,12 @@ export default function App() {
     <EmptyState icon={<AlertIcon width={20} height={20} />} tone="error" title="Can't read this repository" detail={s.error} />
   ) : !s.repo ? (
     s.loading ? (
-      <EmptyState icon={<SpinnerIcon width={18} height={18} />} title="Looking for Claude Code…" />
+      <EmptyState icon={<SpinnerIcon width={18} height={18} />} title="Looking for agent sessions…" />
     ) : (
       <EmptyState
-        icon={<FolderPlusIcon width={20} height={20} />}
+        icon={<Logo size={44} className="mb-1.5" />}
         title="No repository selected"
-        detail="Start Claude Code in a repo, or open one here."
+        detail="Start a coding agent in a repo, or open one here."
         action={
           <button
             type="button"
@@ -466,7 +480,7 @@ export default function App() {
         <Header
           repo={s.repo}
           branch={st ? (st.branch.head ?? "detached") : null}
-          active={s.claude.repos}
+          active={s.agents.repos}
           recent={s.recent}
           onSelectRepo={(r) => void s.selectRepo(r)}
           onBrowse={() => void s.browse()}
@@ -476,7 +490,18 @@ export default function App() {
           canSync={!busy && !!st && st.branch.head !== null}
           onBranchClick={() => setTab("branches")}
         />
-        <StatusBar branch={st?.branch ?? null} claudeActive={claudeActive} busy={busy} onSync={() => void runSync("sync")} />
+        <StatusBar branch={st?.branch ?? null} busy={busy} onSync={() => void runSync("sync")} />
+        {activityLabels.length > 0 && (
+          <div className={`flex h-6 shrink-0 items-center gap-2 px-3 text-[11px] ${workingAgents.length ? "text-accent-text" : "text-fg-3"}`}>
+            {workingAgents.length > 0 && (
+              <span className="relative flex size-1.5 shrink-0">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-accent opacity-60" />
+                <span className="relative inline-flex size-1.5 rounded-full bg-accent" />
+              </span>
+            )}
+            <span>{workingAgents.length > 0 ? workingLabel(workingAgents) : `Recent agent activity: ${activityLabels.join(" · ")}`}</span>
+          </div>
+        )}
         <div className="h-1.5 shrink-0" />
         {s.repo && st && <Tabs tab={tab} onTab={setTab} changes={total} />}
         {notice && (

@@ -7,6 +7,7 @@ import { GraphCell, graphLanes } from "./CommitGraph";
 import { BranchIcon, MoreIcon, SpinnerIcon, TagIcon } from "./icons";
 import { Badge, ListState, Panel, SearchInput, type PanelOps } from "./ListParts";
 import { Menu } from "./Menu";
+import { VirtualList } from "./VirtualList";
 
 const PAGE = 200;
 const ROW_H = 40;
@@ -100,17 +101,21 @@ export function HistoryPanel({ ops, actions, openHash }: { ops: PanelOps; action
       }
     >
       <ListState items={data ? commits : null} error={error} empty="No commits yet." />
-      {shown.map((c) => (
-        <HistoryRow
-          key={c.hash}
-          commit={c}
-          lanes={lanes}
-          active={c.hash === openHash}
-          selected={actions.selected?.hash === c.hash}
-          onClick={(ctrl) => click(c, ctrl)}
-          menu={(close) => actions.menu(commitRef(c), close)}
-        />
-      ))}
+      <VirtualList
+        items={shown}
+        itemHeight={ROW_H}
+        keyExtractor={(c) => c.hash}
+        renderItem={(c) => (
+          <HistoryRow
+            commit={c}
+            lanes={lanes}
+            active={c.hash === openHash}
+            selected={actions.selected?.hash === c.hash}
+            onClick={(ctrl) => click(c, ctrl)}
+            menu={(close) => actions.menu(commitRef(c), close)}
+          />
+        )}
+      />
       {q && shown.length === 0 && commits.length > 0 && <p className="px-4 py-6 text-center text-[12px] text-fg-3">No loaded commit matches.</p>}
       {data?.more && (
         <button

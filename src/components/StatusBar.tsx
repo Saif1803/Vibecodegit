@@ -4,14 +4,13 @@ import { ArrowUpIcon, SyncIcon } from "./icons";
 
 interface Props {
   branch: BranchInfo | null;
-  claudeActive: boolean;
   busy: boolean;
   /** Sync with the upstream, or publish when there is none (VS Code's status-bar button). */
   onSync: () => void;
 }
 
-/** Sync state vs upstream on the left (clickable), Claude activity on the right. */
-export function StatusBar({ branch, claudeActive, busy, onSync }: Props) {
+/** Sync state vs upstream on the left (clickable), agent activity on the right. */
+export function StatusBar({ branch, busy, onSync }: Props) {
   const canSync = !!branch && branch.head !== null && branch.hasCommits;
   const content =
     branch === null ? null : branch.head === null ? (
@@ -50,15 +49,6 @@ export function StatusBar({ branch, claudeActive, busy, onSync }: Props) {
         </button>
       ) : (
         <span className="min-w-0 truncate px-1.5">{content}</span>
-      )}
-      {claudeActive && (
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 pr-1.5 text-accent-text">
-          <span className="relative flex size-1.5">
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-accent opacity-60" />
-            <span className="relative inline-flex size-1.5 rounded-full bg-accent" />
-          </span>
-          Claude is working here
-        </span>
       )}
     </div>
   );

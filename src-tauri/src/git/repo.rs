@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 
 use super::run;
-use crate::claude::ClaudeSession;
+use crate::claude::AgentSession;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RepoRef {
@@ -72,27 +72,35 @@ pub fn resolve_repo(folder: &str) -> Resolved {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ClaudeRepo {
+pub struct AgentActivity {
+    pub name: String,
+    pub last_active_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRepo {
     #[serde(flatten)]
     pub repo: RepoRef,
     pub last_active_ms: u64,
+    pub agents: Vec<AgentActivity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ClaudeRepos {
-    /// Repos with a Claude session in the window, most recently active first.
-    pub repos: Vec<ClaudeRepo>,
+pub struct AgentRepos {
+    /// Repos with a recent coding-agent session, most recently active first.
+    pub repos: Vec<AgentRepo>,
     /// Session folders that aren't inside a git repo.
-    pub non_repos: Vec<ClaudeSession>,
-    /// The newest session overall, so the UI can tell when Claude is outside any repo.
+    pub non_repos: Vec<AgentSession>,
+    /// The newest session overall, so the UI can tell when an agent is outside any repo.
     pub newest_session_id: Option<String>,
 }
 
 /// Maps session cwds to repo roots and merges sessions that share a repo.
-pub fn group_sessions(sessions: Vec<ClaudeSession>, resolve: impl Fn(&str) -> Option<RepoRef>) -> ClaudeRepos {
+pub fn group_sessions(sessions: Vec<AgentSession>, resolve: impl Fn(&str) -> Option<RepoRef>) -> AgentRepos {
     let newest_session_id = sessions.first().map(|s| s.session_id.clone());
-    let mut repos: Vec<ClaudeRepo> = Vec::new();
+    let mut repos: Vec<AgentRepo> = Vec::new();
     let mut non_repos = Vec::new();
     for s in sessions {
         let Some(repo) = resolve(&s.cwd) else {
@@ -100,12 +108,22 @@ pub fn group_sessions(sessions: Vec<ClaudeSession>, resolve: impl Fn(&str) -> Op
             continue;
         };
         match repos.iter_mut().find(|r| same_path(&r.repo.path, &repo.path)) {
-            Some(existing) => existing.last_active_ms = existing.last_active_ms.max(s.last_active_ms),
-            None => repos.push(ClaudeRepo { repo, last_active_ms: s.last_active_ms }),
+            Some(existing) => {
+                existing.last_active_ms = existing.last_active_ms.max(s.last_active_ms);
+                match existing.agents.iter_mut().find(|a| a.name == s.agent) {
+                    Some(agent) => agent.last_active_ms = agent.last_active_ms.max(s.last_active_ms),
+                    None => existing.agents.push(AgentActivity { name: s.agent, last_active_ms: s.last_active_ms }),
+                }
+            }
+            None => repos.push(AgentRepo {
+                repo,
+                last_active_ms: s.last_active_ms,
+                agents: vec![AgentActivity { name: s.agent, last_active_ms: s.last_active_ms }],
+            }),
         }
     }
     repos.sort_by_key(|r| std::cmp::Reverse(r.last_active_ms));
-    ClaudeRepos { repos, non_repos, newest_session_id }
+    AgentRepos { repos, non_repos, newest_session_id }
 }
 
 /// cwd → repo root. Only successes are cached: a folder can become a repo later.
@@ -148,7 +166,7 @@ mod tests {
 
     #[test]
     fn groups_sessions_by_repo_newest_first() {
-        let s = |cwd: &str, id: &str, t: u64| ClaudeSession { cwd: cwd.into(), session_id: id.into(), last_active_ms: t };
+        let s = |cwd: &str, id: &str, t: u64| AgentSession { agent: "test".into(), cwd: cwd.into(), session_id: id.into(), last_active_ms: t };
         let resolve = |cwd: &str| match cwd {
             "C:\\a" | "C:\\a\\sub" => Some(RepoRef { path: "C:\\a".into(), name: "a".into() }),
             "C:\\b" => Some(RepoRef { path: "C:\\b".into(), name: "b".into() }),

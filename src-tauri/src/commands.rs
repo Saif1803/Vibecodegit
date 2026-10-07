@@ -8,10 +8,12 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager};
 
 use crate::claude;
+use crate::codex;
+use crate::gemini;
 use crate::git::commit::{self, CommitOptions, CommitResult, Step, StepState};
 use crate::git::diff::{self, FileDiff, Hunk, Side};
 use crate::git::history::{self, Blame, CommitDetail, History, ResetMode, TimelineEntry};
-use crate::git::repo::{self, ClaudeRepos, Resolved};
+use crate::git::repo::{self, AgentRepos, Resolved};
 use crate::git::status::{self, FileChange, RepoStatus};
 use crate::git::branches::{self, Branch};
 use crate::git::stash::{self, StashEntry, StashMode};
@@ -32,12 +34,17 @@ pub async fn resolve_repo(folder: String) -> Result<Resolved> {
     blocking(move || Ok(repo::resolve_repo(&folder))).await
 }
 
-/// Recent Claude Code sessions, grouped by the repo they're in (newest first).
+/// Recent local agent sessions, grouped by the repo they're in (newest first).
 #[tauri::command]
-pub async fn claude_repos(app: AppHandle) -> Result<ClaudeRepos> {
+pub async fn agent_repos(app: AppHandle) -> Result<AgentRepos> {
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
     blocking(move || {
-        let sessions = claude::scan(&claude::projects_dir(&home), std::time::SystemTime::now(), claude::MAX_AGE);
+        let now = std::time::SystemTime::now();
+        let mut sessions = claude::scan(&claude::projects_dir(&home), now, claude::MAX_AGE);
+        let codex_home = codex::codex_home(&home);
+        sessions.extend(codex::scan(&codex_home.join("sessions"), now, codex::MAX_AGE));
+        sessions.extend(gemini::scan(&home.join(".gemini"), now, gemini::MAX_AGE));
+        sessions.sort_by_key(|s| std::cmp::Reverse(s.last_active_ms));
         Ok(repo::group_sessions(sessions, repo::resolve_cached))
     })
     .await

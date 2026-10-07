@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { errorText } from "../git/api";
+import { useKeyboardList } from "../hooks/useKeyboardList";
 import type { ConfirmRequest } from "./ConfirmDialog";
 import { MoreIcon, SpinnerIcon } from "./icons";
 import { Menu } from "./Menu";
@@ -43,11 +44,12 @@ export function useList<T>(fetch: () => Promise<T[]>, deps: unknown[]) {
 
 /** The rounded surface the lists sit in, same as the Changes list. */
 export function Panel({ children, toolbar }: { children: ReactNode; toolbar?: ReactNode }) {
+  const onListKey = useKeyboardList();
   return (
     <div className="mx-3 mb-3 flex min-h-0 flex-1 flex-col gap-2">
       {toolbar && <div className="flex shrink-0 items-center gap-1.5">{toolbar}</div>}
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-surface">
-        <div className="min-h-0 flex-1 overflow-y-auto py-1">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto py-1" onKeyDown={onListKey}>{children}</div>
       </section>
     </div>
   );

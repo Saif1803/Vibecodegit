@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoSelect, isClaudeActive } from "./claudeSessions";
+import { activeAgents, autoSelect } from "./agentSessions";
 import { pushMru } from "./recentRepos";
 
 const A = "C:\\work\\a";
@@ -46,12 +46,12 @@ describe("autoSelect", () => {
   });
 });
 
-describe("isClaudeActive", () => {
-  it("flags Claude as active only within the window", () => {
-    const repos = [{ path: A, name: "a", lastActiveMs: 1_000_000 }];
-    expect(isClaudeActive(A, repos, 1_000_000 + 30_000)).toBe(true);
-    expect(isClaudeActive(A, repos, 1_000_000 + 120_000)).toBe(false);
-    expect(isClaudeActive(B, repos, 1_000_000)).toBe(false);
-    expect(isClaudeActive(null, repos)).toBe(false);
+describe("activeAgents", () => {
+  it("returns the agent names active within the window", () => {
+    const repos = [{ path: A, name: "a", agents: [{ name: "Codex", lastActiveMs: 1_000_000 }], lastActiveMs: 1_000_000 }];
+    expect(activeAgents(A, repos, 1_000_000 + 30_000)).toEqual(["Codex"]);
+    expect(activeAgents(A, repos, 1_000_000 + 120_000)).toEqual([]);
+    expect(activeAgents(B, repos, 1_000_000)).toEqual([]);
+    expect(activeAgents(null, repos)).toEqual([]);
   });
 });

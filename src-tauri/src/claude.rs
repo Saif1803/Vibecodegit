@@ -20,7 +20,8 @@ pub const MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ClaudeSession {
+pub struct AgentSession {
+    pub agent: String,
     pub cwd: String,
     pub session_id: String,
     pub last_active_ms: u64,
@@ -58,7 +59,7 @@ pub fn recent_logs(projects: &Path, now: SystemTime, max_age: Duration) -> Vec<(
 }
 
 /// Sessions modified within `max_age` of `now`, newest first, one per distinct `cwd`.
-pub fn scan(projects: &Path, now: SystemTime, max_age: Duration) -> Vec<ClaudeSession> {
+pub fn scan(projects: &Path, now: SystemTime, max_age: Duration) -> Vec<AgentSession> {
     let logs = recent_logs(projects, now, max_age);
     let mut seen = HashSet::new();
     let mut sessions = Vec::new();
@@ -67,7 +68,8 @@ pub fn scan(projects: &Path, now: SystemTime, max_age: Duration) -> Vec<ClaudeSe
         if !seen.insert(cwd.clone()) {
             continue;
         }
-        sessions.push(ClaudeSession {
+        sessions.push(AgentSession {
+            agent: "Claude Code".to_owned(),
             cwd,
             session_id: path.file_stem().unwrap_or_default().to_string_lossy().into_owned(),
             last_active_ms: modified.duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64,

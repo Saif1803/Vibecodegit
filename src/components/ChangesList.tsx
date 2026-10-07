@@ -1,7 +1,9 @@
 import { useState, type ReactNode } from "react";
 import type { ChangeKind, ChangeSide, FileChange } from "../git/types";
+import { useKeyboardList } from "../hooks/useKeyboardList";
 import { FileTypeIcon } from "./fileIcons";
 import { ChevronDownIcon, IgnoreIcon, MinusIcon, PlusIcon, UndoIcon } from "./icons";
+import { VirtualList } from "./VirtualList";
 
 const BADGE: Record<ChangeKind, { letter: string; className: string; label: string }> = {
   modified: { letter: "M", className: "text-st-modified", label: "Modified" },
@@ -41,12 +43,13 @@ function split(path: string) {
 /** VS Code's Source Control list: Merge Changes, Staged Changes, Changes. */
 export function ChangesList({ staged, unstaged, conflicted, active, disabled, empty, ...act }: Props) {
   const total = staged.length + unstaged.length + conflicted.length;
+  const onListKey = useKeyboardList();
   return (
     <section className="mx-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-line bg-surface">
       {empty !== undefined ? (
         empty
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto pb-1" aria-label={`${total} changed files`}>
+        <div className="min-h-0 flex-1 overflow-y-auto pb-1" aria-label={`${total} changed files`} onKeyDown={onListKey}>
           {conflicted.length > 0 && (
             <Section
               title="Merge Changes"
@@ -55,6 +58,7 @@ export function ChangesList({ staged, unstaged, conflicted, active, disabled, em
               active={active}
               disabled={disabled}
               onOpen={act.open}
+              onToggleStage={(f) => act.stage([f])}
               bulk={[{ label: "Mark all resolved", icon: <PlusIcon />, run: () => act.stage(conflicted) }]}
               rowActions={(f) => [{ label: "Mark resolved (stage)", icon: <PlusIcon />, run: () => act.stage([f]) }]}
             />
@@ -67,6 +71,7 @@ export function ChangesList({ staged, unstaged, conflicted, active, disabled, em
               active={active}
               disabled={disabled}
               onOpen={act.open}
+              onToggleStage={(f) => act.unstage([f])}
               bulk={[{ label: "Unstage all", icon: <MinusIcon />, run: () => act.unstage(staged) }]}
               rowActions={(f) => [{ label: "Unstage", icon: <MinusIcon />, run: () => act.unstage([f]) }]}
             />
@@ -79,6 +84,7 @@ export function ChangesList({ staged, unstaged, conflicted, active, disabled, em
               active={active}
               disabled={disabled}
               onOpen={act.open}
+              onToggleStage={(f) => act.stage([f])}
               bulk={[
                 { label: "Discard all changes", icon: <UndoIcon />, run: () => act.discard(unstaged) },
                 { label: "Stage all", icon: <PlusIcon />, run: () => act.stage(unstaged) },
@@ -109,6 +115,7 @@ function Section({
   active,
   disabled,
   onOpen,
+  onToggleStage,
   bulk,
   rowActions,
 }: {
@@ -118,6 +125,7 @@ function Section({
   active: Props["active"];
   disabled: boolean;
   onOpen: ChangeActions["open"];
+  onToggleStage?: (f: FileChange) => void;
   bulk: Action[];
   rowActions: (f: FileChange) => Action[];
 }) {
@@ -142,50 +150,59 @@ function Section({
         <span className="rounded-md bg-chip px-1.5 text-[11px] leading-[18px] text-fg-2 tabular-nums">{files.length}</span>
       </header>
       {!collapsed && (
-        <ul>
-          {files.map((f) => {
+        <VirtualList
+          items={files}
+          itemHeight={28}
+          keyExtractor={(f) => f.path}
+          threshold={40}
+          className="py-1"
+          renderItem={(f) => {
             const badge = BADGE[f.kind];
             const { dir, name } = split(f.path);
             const isActive = active?.path === f.path && active.side === side;
             return (
-              <li key={f.path}>
-                <div
-                  role="button"
-                  tabIndex={0}
-                  aria-current={isActive || undefined}
-                  onClick={() => onOpen(f, side)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.ctrlKey) onOpen(f, side);
-                  }}
-                  title={f.origPath ? `${f.origPath} → ${f.path}` : f.path}
-                  className={`group mx-1 flex h-7 cursor-default items-center gap-2 rounded-lg pr-1 pl-2.5 outline-none focus-visible:ring-1 focus-visible:ring-accent/60 ${
-                    isActive ? "bg-hover" : "hover:bg-hover"
-                  }`}
+              <div
+                role="button"
+                tabIndex={0}
+                aria-current={isActive || undefined}
+                onClick={() => onOpen(f, side)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.ctrlKey) {
+                    e.preventDefault();
+                    onOpen(f, side);
+                  } else if (e.key === " " && onToggleStage) {
+                    e.preventDefault();
+                    onToggleStage(f);
+                  }
+                }}
+                title={f.origPath ? `${f.origPath} → ${f.path}` : f.path}
+                className={`group mx-1 flex h-7 cursor-default items-center gap-2 rounded-lg pr-1 pl-2.5 outline-none focus-visible:ring-1 focus-visible:ring-accent/60 ${
+                  isActive ? "bg-hover" : "hover:bg-hover"
+                }`}
+              >
+                <FileTypeIcon path={f.path} className={f.kind === "deleted" ? "opacity-50" : ""} />
+                <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                  <span className={`min-w-0 truncate ${f.kind === "deleted" ? "text-fg-3 line-through" : "text-fg"}`}>{name}</span>
+                  <span className="min-w-0 shrink-[4] truncate text-[12px] text-fg-3">
+                    {f.origPath ? `← ${split(f.origPath).name}` : dir}
+                  </span>
+                </span>
+                <span className="hidden shrink-0 group-focus-within:flex group-hover:flex">
+                  {rowActions(f).map((a) => (
+                    <IconButton key={a.label} action={a} disabled={disabled} />
+                  ))}
+                </span>
+                <span
+                  aria-label={badge.label}
+                  title={badge.label}
+                  className={`w-4 shrink-0 text-center font-mono text-[11px] font-semibold ${badge.className}`}
                 >
-                  <FileTypeIcon path={f.path} className={f.kind === "deleted" ? "opacity-50" : ""} />
-                  <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-                    <span className={`min-w-0 truncate ${f.kind === "deleted" ? "text-fg-3 line-through" : "text-fg"}`}>{name}</span>
-                    <span className="min-w-0 shrink-[4] truncate text-[12px] text-fg-3">
-                      {f.origPath ? `← ${split(f.origPath).name}` : dir}
-                    </span>
-                  </span>
-                  <span className="hidden shrink-0 group-focus-within:flex group-hover:flex">
-                    {rowActions(f).map((a) => (
-                      <IconButton key={a.label} action={a} disabled={disabled} />
-                    ))}
-                  </span>
-                  <span
-                    aria-label={badge.label}
-                    title={badge.label}
-                    className={`w-4 shrink-0 text-center font-mono text-[11px] font-semibold ${badge.className}`}
-                  >
-                    {badge.letter}
-                  </span>
-                </div>
-              </li>
+                  {badge.letter}
+                </span>
+              </div>
             );
-          })}
-        </ul>
+          }}
+        />
       )}
     </div>
   );

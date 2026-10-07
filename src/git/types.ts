@@ -97,19 +97,26 @@ export type Resolved =
   | { ok: true; repo: RepoRef }
   | { ok: false; reason: "missing" | "not-a-repo"; message: string };
 
-export interface ClaudeSessionRepo extends RepoRef {
+export interface AgentActivity {
+  name: string;
   lastActiveMs: number;
 }
 
+export interface AgentSessionRepo extends RepoRef {
+  lastActiveMs: number;
+  agents: AgentActivity[];
+}
+
 export interface RawSession {
+  agent: string;
   cwd: string;
   sessionId: string;
   lastActiveMs: number;
 }
 
-export interface ClaudeRepos {
-  /** Repos with a Claude session in the last 24 h, most recently active first. */
-  repos: ClaudeSessionRepo[];
+export interface AgentRepos {
+  /** Repos with a recent local coding-agent session, most recently active first. */
+  repos: AgentSessionRepo[];
   /** Session folders that aren't inside a git repo. */
   nonRepos: RawSession[];
   /** The newest session overall. */

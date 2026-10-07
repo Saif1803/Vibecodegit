@@ -19,7 +19,7 @@ interface Props {
   /** Live step states while busy, in run order. */
   stepOrder: Step[];
   steps: Partial<Record<Step, StepState>>;
-  /** Ask before committing (Claude is still editing this repo). */
+  /** Ask before committing when a coding agent was recently active in this repo. */
   confirming: boolean;
   action: CommitAction;
   onAction: (a: CommitAction) => void;
@@ -82,7 +82,7 @@ export function CommitBox(p: Props) {
       <div className="flex min-h-[42px] items-center gap-2 px-2.5 pb-2.5">
         {p.confirming ? (
           <>
-            <span className="min-w-0 flex-1 pl-1 text-[12px] leading-4 text-accent-text">Claude is still editing here.</span>
+            <span className="min-w-0 flex-1 pl-1 text-[12px] leading-4 text-accent-text">An agent is still editing here.</span>
             <button
               type="button"
               onClick={p.onCancel}

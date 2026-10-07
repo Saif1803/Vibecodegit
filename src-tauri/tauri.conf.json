@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ClaudeGit",
+  "productName": "VibecodeGit",
   "version": "0.1.0",
   "identifier": "com.saif.claudegit",
   "build": {
@@ -13,8 +13,8 @@
     "windows": [
       {
         "label": "main",
-        "title": "ClaudeGit",
-        "width": 380,
+        "title": "VibecodeGit",
+        "width": 420,
         "height": 500,
         "resizable": true,
         "minWidth": 340,

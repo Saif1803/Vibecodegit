@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { ClaudeSessionRepo, RepoRef } from "../git/types";
+import type { AgentSessionRepo, RepoRef } from "../git/types";
 import { ago } from "../lib/time";
 import { CheckIcon, ChevronDownIcon, FolderIcon, FolderPlusIcon } from "./icons";
 
 interface Props {
   current: RepoRef | null;
-  active: ClaudeSessionRepo[];
+  active: AgentSessionRepo[];
   recent: RepoRef[];
   onSelect: (repo: RepoRef) => void;
   onBrowse: () => void;
@@ -62,10 +62,10 @@ export function RepoPicker({ current, active, recent, onSelect, onBrowse }: Prop
           className="absolute top-full left-0 z-20 mt-1 w-[300px] rounded-xl border border-line bg-raised p-1 shadow-pop"
         >
           {active.length > 0 && (
-            <Group label="Active in Claude Code">
+            <Group label="Active in coding agents">
               {active.map((r) => (
                 <Item key={r.path} repo={r} selected={r.path === current?.path} onPick={pick}>
-                  <span className="text-[11px] text-fg-3 tabular-nums">{ago(r.lastActiveMs)}</span>
+                  <span className="text-[11px] text-fg-3 tabular-nums">{r.agents.map((agent) => agent.name).join(", ")} · {ago(r.lastActiveMs)}</span>
                 </Item>
               ))}
             </Group>

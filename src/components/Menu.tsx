@@ -38,12 +38,34 @@ export function Menu({
         e.preventDefault();
         e.stopPropagation();
         setOpen(false);
+        button.current?.focus();
+        return;
+      }
+      // Arrow navigation within menu items
+      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+        e.preventDefault();
+        const items = Array.from(
+          menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"]') ?? [],
+        ).filter((el) => !el.hasAttribute("disabled"));
+        if (items.length === 0) return;
+        const cur = items.indexOf(document.activeElement as HTMLElement);
+        let next: number;
+        if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = items.length - 1;
+        else if (e.key === "ArrowDown") next = cur < items.length - 1 ? cur + 1 : 0;
+        else next = cur > 0 ? cur - 1 : items.length - 1;
+        items[next].focus();
       }
     };
     // Fixed-position menus don't follow their trigger when a list scrolls, so close instead.
     const onScroll = (e: Event) => {
       if (!menu.current?.contains(e.target as Node)) setOpen(false);
     };
+    // Focus first item on open
+    requestAnimationFrame(() => {
+      const first = menu.current?.querySelector<HTMLElement>('[role="menuitem"]:not([disabled]), [role="menuitemcheckbox"]:not([disabled]), [role="menuitemradio"]:not([disabled])');
+      first?.focus();
+    });
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("scroll", onScroll, true);

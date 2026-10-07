@@ -1,21 +1,21 @@
-# ClaudeGit
+# VibecodeGit
 
 A tiny Windows tray app for quick commits: pick files, write a message, **Commit & Push**.
-It follows Claude Code: when you open it, it selects the repo your newest Claude Code session is working in.
+It detects recent Claude Code, Codex CLI, and Gemini CLI sessions and selects the repo the newest agent session is working in.
 
 Built with Tauri 2, React, TypeScript, and Tailwind. It uses your system `git`, and git is the only program it's allowed to run.
 
 ## Use
 
 - **Ctrl+Shift+G** or a left-click on the tray icon toggles the popup. Esc, clicking elsewhere, or Alt+F4 hides it. Quit is in the tray menu.
-- **Repo menu:** "Active in Claude Code" (sessions from the last 24 h), "Recent", and "Open folder…".
+- **Repo menu:** "Active in coding agents" (recent Claude Code, Codex CLI, and Gemini CLI sessions), "Recent", and "Open folder…".
 - **Checkboxes** choose exactly what goes into this commit. Anything already staged starts checked. Other staged files stay staged.
 - **Ctrl+Enter** or **Commit & Push** runs these steps, showing live progress:
   1. add
   2. commit
   3. pull (fetch, then rebase onto upstream)
   4. push
-- **If Claude is still editing the repo,** you're asked to confirm first.
+- **If an agent is still editing the repo,** you're asked to confirm first.
 - **If the pull conflicts,** the rebase is undone and your commit stays local.
 - **If there's no upstream,** the branch is published to `origin`. If there's no remote, the commit stays local.
 - **Theme:** follows Windows light/dark. The header button cycles System, Light, and Dark.

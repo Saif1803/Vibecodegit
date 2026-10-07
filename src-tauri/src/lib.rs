@@ -1,4 +1,6 @@
 mod claude;
+mod codex;
+mod gemini;
 mod commands;
 mod git;
 mod placement;
@@ -15,12 +17,16 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_store::StoreExt;
 
+const SETTINGS_STORE: &str = "settings.json";
+const SHORTCUT_KEY: &str = "shortcut";
+const DEFAULT_SHORTCUT: &str = "Ctrl+Shift+G";
+
 const MAIN: &str = "main";
 const TRAY: &str = "tray";
 const EDGE_MARGIN: i32 = 12;
 /// Default logical sizes: the tray popup, and with a detail pane (diff, commit, graph) open.
 /// The user can resize either; each mode remembers its own size.
-const COMPACT: (f64, f64) = (380.0, 500.0);
+const COMPACT: (f64, f64) = (420.0, 500.0);
 const EXPANDED: (f64, f64) = (960.0, 640.0);
 /// Smallest sizes the layout still works at (the detail pane sits beside a 380 px column).
 const COMPACT_MIN: (f64, f64) = (340.0, 420.0);
@@ -46,6 +52,8 @@ struct WindowState {
     last_blur_hide: Mutex<Option<Instant>>,
     shown_at: Mutex<Option<Instant>>,
     layout: Mutex<Layout>,
+    /// The currently registered shortcut string (e.g. "Ctrl+Shift+G").
+    shortcut_str: Mutex<String>,
 }
 
 /// Where the user put the window and how big they made it. Until they drag it, it opens
@@ -113,8 +121,138 @@ fn capture(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
-fn toggle_shortcut() -> Shortcut {
+fn default_shortcut() -> Shortcut {
     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyG)
+}
+
+/// Parse a user-facing shortcut string like "Ctrl+Shift+G" or "Alt+F2" into a Shortcut.
+fn parse_shortcut(s: &str) -> std::result::Result<Shortcut, String> {
+    let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
+    if parts.is_empty() {
+        return Err("Empty shortcut".into());
+    }
+    let mut mods = Modifiers::empty();
+    for &part in &parts[..parts.len() - 1] {
+        match part.to_lowercase().as_str() {
+            "ctrl" | "control" => mods |= Modifiers::CONTROL,
+            "shift" => mods |= Modifiers::SHIFT,
+            "alt" => mods |= Modifiers::ALT,
+            "super" | "win" | "meta" | "cmd" => mods |= Modifiers::SUPER,
+            other => return Err(format!("Unknown modifier: {other}")),
+        }
+    }
+    let key_str = *parts.last().ok_or("No key specified")?;
+    let code = match key_str.to_lowercase().as_str() {
+        // Letters
+        "a" => Code::KeyA, "b" => Code::KeyB, "c" => Code::KeyC, "d" => Code::KeyD,
+        "e" => Code::KeyE, "f" => Code::KeyF, "g" => Code::KeyG, "h" => Code::KeyH,
+        "i" => Code::KeyI, "j" => Code::KeyJ, "k" => Code::KeyK, "l" => Code::KeyL,
+        "m" => Code::KeyM, "n" => Code::KeyN, "o" => Code::KeyO, "p" => Code::KeyP,
+        "q" => Code::KeyQ, "r" => Code::KeyR, "s" => Code::KeyS, "t" => Code::KeyT,
+        "u" => Code::KeyU, "v" => Code::KeyV, "w" => Code::KeyW, "x" => Code::KeyX,
+        "y" => Code::KeyY, "z" => Code::KeyZ,
+        // Digits
+        "0" => Code::Digit0, "1" => Code::Digit1, "2" => Code::Digit2, "3" => Code::Digit3,
+        "4" => Code::Digit4, "5" => Code::Digit5, "6" => Code::Digit6, "7" => Code::Digit7,
+        "8" => Code::Digit8, "9" => Code::Digit9,
+        // Function keys
+        "f1" => Code::F1, "f2" => Code::F2, "f3" => Code::F3, "f4" => Code::F4,
+        "f5" => Code::F5, "f6" => Code::F6, "f7" => Code::F7, "f8" => Code::F8,
+        "f9" => Code::F9, "f10" => Code::F10, "f11" => Code::F11, "f12" => Code::F12,
+        // Others
+        "space" => Code::Space, "enter" | "return" => Code::Enter,
+        "tab" => Code::Tab, "escape" | "esc" => Code::Escape,
+        "backspace" => Code::Backspace, "delete" | "del" => Code::Delete,
+        "insert" | "ins" => Code::Insert, "home" => Code::Home, "end" => Code::End,
+        "pageup" => Code::PageUp, "pagedown" => Code::PageDown,
+        "`" | "backquote" => Code::Backquote,
+        "-" | "minus" => Code::Minus, "=" | "equal" => Code::Equal,
+        "[" | "bracketleft" => Code::BracketLeft, "]" | "bracketright" => Code::BracketRight,
+        "\\" | "backslash" => Code::Backslash,
+        ";" | "semicolon" => Code::Semicolon, "'" | "quote" => Code::Quote,
+        "," | "comma" => Code::Comma, "." | "period" => Code::Period,
+        "/" | "slash" => Code::Slash,
+        other => return Err(format!("Unknown key: {other}")),
+    };
+    let mods_opt = if mods.is_empty() { None } else { Some(mods) };
+    Ok(Shortcut::new(mods_opt, code))
+}
+
+fn load_shortcut_str(app: &AppHandle) -> String {
+    app.store(SETTINGS_STORE)
+        .ok()
+        .and_then(|store| store.get(SHORTCUT_KEY))
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_else(|| DEFAULT_SHORTCUT.to_string())
+}
+
+fn save_shortcut_str(app: &AppHandle, s: &str) {
+    if let Ok(store) = app.store(SETTINGS_STORE) {
+        store.set(SHORTCUT_KEY, serde_json::json!(s));
+        let _ = store.save();
+    }
+}
+
+/// Unregister the old shortcut, register the new one, update tray tooltip and menu.
+fn apply_shortcut(app: &AppHandle, new_str: &str) -> std::result::Result<(), String> {
+    let new_sc = parse_shortcut(new_str)?;
+    let gs = app.global_shortcut();
+
+    // Unregister old
+    let state = app.state::<WindowState>();
+    let old_str = state.shortcut_str.lock().unwrap().clone();
+    if let Ok(old_sc) = parse_shortcut(&old_str) {
+        let _ = gs.unregister(old_sc);
+    }
+
+    // Register new
+    gs.on_shortcut(new_sc, move |app, _shortcut, event| {
+        if event.state() == ShortcutState::Pressed {
+            toggle(app);
+        }
+    }).map_err(|e| format!("Could not register {new_str}: {e}"))?;
+
+    // Update state
+    *state.shortcut_str.lock().unwrap() = new_str.to_string();
+
+    // Update tray
+    update_tray_shortcut(app, new_str);
+    Ok(())
+}
+
+fn update_tray_shortcut(app: &AppHandle, shortcut_str: &str) {
+    if let Some(tray) = app.tray_by_id(TRAY) {
+        let _ = tray.set_tooltip(Some(&format!("VibecodeGit ({shortcut_str})")));
+        if let Ok(show_item) = MenuItem::with_id(app, "show", format!("Show  ({shortcut_str})"), true, None::<&str>) {
+            if let Ok(reset_item) = MenuItem::with_id(app, "reset", "Reset window position and size", true, None::<&str>) {
+                if let Ok(quit_item) = MenuItem::with_id(app, "quit", "Quit VibecodeGit", true, None::<&str>) {
+                    if let Ok(menu) = Menu::with_items(app, &[&show_item, &reset_item, &quit_item]) {
+                        let _ = tray.set_menu(Some(menu));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Returns the current shortcut string for the webview.
+#[tauri::command]
+fn get_shortcut(state: tauri::State<WindowState>) -> String {
+    state.shortcut_str.lock().unwrap().clone()
+}
+
+/// Change the global shortcut. Validates, persists, and re-registers it.
+#[tauri::command]
+fn set_shortcut(app: AppHandle, shortcut: String) -> std::result::Result<(), String> {
+    let shortcut = shortcut.trim().to_string();
+    if shortcut.is_empty() {
+        return Err("Shortcut cannot be empty".into());
+    }
+    // Validate first
+    parse_shortcut(&shortcut)?;
+    apply_shortcut(&app, &shortcut)?;
+    save_shortcut_str(&app, &shortcut);
+    Ok(())
 }
 
 fn main_window(app: &AppHandle) -> Option<WebviewWindow> {
@@ -325,22 +463,20 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show(app)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, shortcut, event| {
-                    if *shortcut == toggle_shortcut() && event.state() == ShortcutState::Pressed {
-                        toggle(app);
-                    }
-                })
-                .build(),
-        )
-        .manage(WindowState { blur_hide: AtomicBool::new(true), ..Default::default() })
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .manage(WindowState {
+            blur_hide: AtomicBool::new(true),
+            shortcut_str: Mutex::new(DEFAULT_SHORTCUT.to_string()),
+            ..Default::default()
+        })
         .invoke_handler(tauri::generate_handler![
+            get_shortcut,
+            set_shortcut,
             set_blur_hide,
             set_expanded,
             hide_window,
             commands::resolve_repo,
-            commands::claude_repos,
+            commands::agent_repos,
             commands::git_status,
             commands::stage,
             commands::stage_all,
@@ -400,15 +536,24 @@ pub fn run() {
             let layout = load_layout(app.handle());
             *app.state::<WindowState>().layout.lock().unwrap() = layout;
 
-            let show_item = MenuItem::with_id(app, "show", "Show  (Ctrl+Shift+G)", true, None::<&str>)?;
+            // Load persisted shortcut (or default)
+            let shortcut_str = load_shortcut_str(app.handle());
+            *app.state::<WindowState>().shortcut_str.lock().unwrap() = shortcut_str.clone();
+
+            let show_item = MenuItem::with_id(app, "show", format!("Show  ({shortcut_str})"), true, None::<&str>)?;
             let reset_item = MenuItem::with_id(app, "reset", "Reset window position and size", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit ClaudeGit", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit VibecodeGit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &reset_item, &quit_item])?;
 
-            let mut tooltip = String::from("ClaudeGit (Ctrl+Shift+G)");
-            if let Err(e) = app.global_shortcut().register(toggle_shortcut()) {
-                eprintln!("could not register Ctrl+Shift+G: {e}");
-                tooltip = String::from("ClaudeGit (Ctrl+Shift+G unavailable: in use by another app)");
+            let mut tooltip = format!("VibecodeGit ({shortcut_str})");
+            let sc = parse_shortcut(&shortcut_str).unwrap_or_else(|_| default_shortcut());
+            if let Err(e) = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
+                if event.state() == ShortcutState::Pressed {
+                    toggle(app);
+                }
+            }) {
+                eprintln!("could not register {shortcut_str}: {e}");
+                tooltip = format!("VibecodeGit ({shortcut_str} unavailable: in use by another app)");
             }
 
             TrayIconBuilder::with_id(TRAY)

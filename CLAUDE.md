@@ -1,4 +1,4 @@
-# ClaudeGit: tray commit utility
+# VibecodeGit: tray commit utility
 
 A tiny Windows-first system-tray app for quick "stage → commit → pull --rebase → push" without opening an IDE or terminal.
 
@@ -12,6 +12,7 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
   - `tauri-plugin-store` persists recent repos.
   - `tauri-plugin-single-instance` stops a second launch from creating a second tray icon.
 - Tray icon: Tauri core `tray-icon` feature (`TrayIconBuilder`)
+- App and tray icon: `src-tauri/icons/app-icon.png` (1024 px: a git branch leading into a starburst, on clay). Regenerate the set with `npx tauri icon src-tauri/icons/app-icon.png`, then delete the `android/`, `ios/` and `64x64.png` it also writes, and refresh the UI copy `src/assets/logo.png` (128 px). Cargo doesn’t notice icon changes, so touch `src-tauri/build.rs` (the .exe icon) and `src-tauri/src/lib.rs` (`generate_context!`, the tray icon) to force a rebuild.
 
 ## Spec
 
@@ -19,7 +20,7 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 - The app lives only in the system tray. It has no taskbar entry (`skipTaskbar: true`) and the window starts hidden.
 - Tray **left-click** toggles the window. The tray **menu** has Show, Reset window position and size, and Quit.
 - **Ctrl+Shift+G** (global) toggles the window: show and focus it if hidden, hide it if visible.
-- The window is borderless (`decorations: false`), always on top, **380×500** by default when compact, and sits near the tray until you move it.
+- The window is borderless (`decorations: false`), always on top, **420×500** by default when compact, and sits near the tray until you move it.
   - **Resizable** from its edges (min 340×420 compact, 720×480 expanded). **Draggable** from empty space in the header, the status line, and a detail pane's header (`src/hooks/dragWindow.ts` → `startDragging`, the webview's only window permission).
   - **Remembered:** on hide (and before switching modes) Rust compares the window with where it last put it (`placement::differs`). A drag saves the position; a resize saves that mode's size. They're kept in the store file `window.json` across launches. A saved position is pulled back on-screen if its monitor is gone (`placement::keep_inside`); sizes shrink to fit a smaller screen. The tray menu's Reset forgets them.
   - **Expanded mode:** opening a detail pane (a diff, a commit, the graph) switches the window to the expanded size (default about **960×640**, clamped to the work area) via the Rust command `set_expanded(expanded)`. The compact column stays 380 px on the left and the detail pane sits on the right. Closing the pane, Esc, or hiding collapses it back.
@@ -36,28 +37,28 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
   - On every show, Rust emits a `window-shown` event to the webview (used for refresh-on-show).
 - Status is refreshed every time the window is shown.
 
-### Auto-detect the Claude Code working folder
-- **Source:** every Claude Code session (CLI, desktop app, IDE) appends to `~/.claude/projects/<encoded>/<session-id>.jsonl`. Use `$CLAUDE_CONFIG_DIR/projects` if that env var is set.
-  - Most entries carry a `cwd` field with the exact working directory.
-  - Never decode the `<encoded>` folder name. It is lossy (`\`, `:`, `_` all become `-`).
-- **Detection (Rust command `claude_repos`, `src-tauri/src/claude.rs`):**
+### Auto-detect recent coding-agent working folders
+- **Sources:** Claude Code writes to `~/.claude/projects/<encoded>/<session-id>.jsonl` (or `$CLAUDE_CONFIG_DIR/projects`); Codex CLI writes rollout JSONL files under `~/.codex/sessions` (or `$CODEX_HOME/sessions`); Gemini CLI writes chats under `~/.gemini/tmp/<project-id>/chats`, mapped to working folders by `~/.gemini/runtime/projects.json`.
+- Claude entries carry a `cwd` field; Codex stores it in the first `session_meta` record; Gemini maps its project ID to a path in the registry.
+- Never decode Claude's `<encoded>` folder name. It is lossy (`\`, `:`, `_` all become `-`).
+- **Detection (Rust command `agent_repos`, `src-tauri/src/{claude,codex,gemini}.rs`):**
   1. Find the `*.jsonl` files modified in the last 24 h, newest first.
   2. For each, read **backward from the end in chunks** until a line with a `cwd` is found. Lines can be huge, and some types (for example `file-history-snapshot`) have no `cwd`.
-  3. Return `{ cwd, sessionId, lastActiveMs }`, deduplicated by `cwd` and keeping the newest.
+  3. Return `{ agent, cwd, sessionId, lastActiveMs }`, deduplicated by `cwd` and keeping the newest per agent.
   - Read-only. No `fs` plugin permission is needed, because the command runs in Rust.
-- **Normalization (Rust, `git/repo.rs`):** each `cwd` goes through `git rev-parse --show-toplevel` (successes cached), and sessions in the same repo are merged. The command returns `{ repos, nonRepos, newestSessionId }`.
+- **Normalization (Rust, `git/repo.rs`):** each `cwd` goes through `git rev-parse --show-toplevel` (successes cached), and sessions in the same repo are merged with their agent names. The command returns `{ repos, nonRepos, newestSessionId }`.
   - A subfolder resolves to its repo root. Worktrees resolve to the worktree, which is correct.
-  - A `cwd` that isn't a git repo shows as "Claude is in <folder>, not a git repo" and is not selectable.
+  - A `cwd` that isn't a git repo shows which agent is in that folder and is not selectable.
 - **On every window show:**
   - Re-run detection and auto-select the repo of the **most recently active** session.
-  - Exception: if that repo is the same one auto-selected last time, keep whatever the user has chosen since. A manual pick sticks until Claude moves to a different folder.
-- **"Claude is working" indicator:** if the selected repo's session log was written in the last **90 s**, show a pulsing badge next to the branch ("Claude is building here").
-  - Commit & Push then asks for a one-click confirmation ("Claude is still editing. Commit anyway?"), so a half-finished edit isn't pushed by accident.
+  - Exception: if that repo is the same one auto-selected last time, keep whatever the user has chosen since. A manual pick sticks until a new agent session appears in a different folder.
+- **"Agent is working" indicator:** if the selected repo's session log was written in the last **90 s**, show a pulsing badge next to the branch.
+  - Commit & Push asks for a one-click confirmation before pushing recent agent work.
   - The badge updates while the window is open by polling detection every 5 s, only while visible.
 
 ### Window contents (top → bottom)
 1. **Repo selector**: a dropdown with two groups.
-   - **Active in Claude Code:** detected sessions from the last 24 h, newest first, with a relative time such as "2 min ago".
+   - **Active in coding agents:** detected sessions from the last 24 h, newest first, showing the agent name and a relative time.
    - **Recent:** repos you picked or committed to, most recent first, max 8, persisted.
    - A "Browse…" folder-picker button sits next to the dropdown.
    - A picked folder is validated with `git rev-parse --show-toplevel` and normalized to the repo root.
@@ -81,7 +82,7 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 ### Design: match the Claude desktop app
 - **Look:** the Claude desktop app's visual language.
   - Warm neutral surfaces, hairline borders, 8–16 px radii, and the Claude clay accent `#D97757`.
-  - Line icons at 1.4 px stroke, inline SVG in `src/components/icons.tsx`. No icon library and no Anthropic logos.
+  - Line icons at 1.4 px stroke, inline SVG in `src/components/icons.tsx`. No icon library. The only image mark in the UI is the app logo (`Logo.tsx`: the header and the no-repo screen).
   - File rows (changes list, commit/stash/compare file lists, diff header) carry a file-type icon from [vscode-icons](https://github.com/vscode-icons/vscode-icons) (MIT), via `src/components/fileIcons.tsx`. It is picked like VS Code does: whole file name, then the longest extension, then the language (`fileType`, unit-tested). Light-theme variants swap in with `prefers-color-scheme`. These are the only colored icons that are not tokens.
   - The SVGs live in `public/file-icons/` (with vscode-icons' LICENSE) and the lookup table in `src/components/fileIconMap.ts`. Both are generated: clone vscode-icons, then run `node scripts/file-icons.mjs <checkout>`. Don’t edit them by hand.
 - **Themes:** light and dark are both first-class.
@@ -140,7 +141,7 @@ A tiny Windows-first system-tray app for quick "stage → commit → pull --reba
 - **Vitest (`npm test`):** UI-side logic only: path compare, MRU, auto-select, Claude-active window, graph width, prompt → commit message, file name → icon type.
 - **UI states:** `npm run dev`, then open `http://localhost:1420/preview.html?s=normal|claude|blocked|conflict|pushfail|clean|norepo|unborn|ahead|secrets|icons` (`icons` lists a spread of file-type icons).
   - This is the real App with the Rust commands mocked by an in-memory fake repo (`src/dev/preview.tsx`). It's dev-only and not part of the build.
-  - Emulate 380×500 for compact and 960×640 for the diff pane; also check the 340×420 minimum.
+  - Emulate 420×500 for compact (380 wide is the column beside a detail pane) and 960×640 for the diff pane; also check the 340×420 minimum.
 - Don't drive the user's real desktop with synthetic mouse or keyboard input to test the tray app. Use the preview, read-only window queries, and logs.
 
 ### Security / capabilities
@@ -160,14 +161,14 @@ src/
   git/types.ts                           # TS mirrors of the Rust serde types
   git/api.ts                             # typed invoke wrappers: the UI's only way to reach git
   git/repo.ts                            # path normalize/compare for the UI
-  components/icons.tsx, fileIcons.tsx, fileIconMap.ts (generated), Header.tsx, StatusBar.tsx, Banner.tsx, StepProgress.tsx
+  components/icons.tsx, Logo.tsx, fileIcons.tsx, fileIconMap.ts (generated), Header.tsx, StatusBar.tsx, Banner.tsx, StepProgress.tsx
   components/RepoPicker.tsx, ChangesList.tsx, CommitBox.tsx, DiffView.tsx, ConfirmDialog.tsx, PromptDialog.tsx, Menu.tsx
   components/Tabs.tsx, ListParts.tsx, BranchesPanel.tsx, TagsPanel.tsx, StashesPanel.tsx, StashView.tsx
   components/HistoryPanel.tsx, CommitGraph.tsx, commitActions.tsx, CommitView.tsx, FileHistoryViews.tsx, FileListDiff.tsx
   components/Worktrees.tsx
   state/recentRepos.ts                   # plugin-store MRU
   state/prompts.ts                       # a Claude prompt -> commit message suggestion
-  state/claudeSessions.ts                # auto-select rule, Claude-active window
+  state/agentSessions.ts                 # auto-select rule, agent-active window
   state/pickFolder.ts                    # dialog + set_blur_hide pause
   state/useRepoState.ts                  # the app's data hook; refreshes on `window-shown`
   hooks/useWindowBehavior.ts             # Esc, blur-hide, refresh-on-show, set_expanded
@@ -308,6 +309,11 @@ Re-scoped for committing Claude's work: keep the good parts of an edit, don't le
 - Repo setup: **Init** a folder and **Clone** a URL.
 
 ### Phase 10: Polish and release
-- Keyboard navigation for lists and menus, empty/loading/error states for every tab, and a preview scenario per tab.
-- Performance on big repos: virtualized lists, capped diffs.
-- **Done when:** `npm test`, `npm run typecheck` and `cargo test` pass, and `npm run tauri build` produces an installer that runs from the tray.
+- Keyboard navigation:
+  - Arrow ↑/↓ and Home/End across Menu, Tabs strip (Arrow ←/→), ChangesList, Branches, Tags, Stashes, and History (`useKeyboardList`).
+  - Enter opens diffs / commits / branches; Space stages / unstages files in ChangesList.
+- Empty, loading, and error states for every tab via `ListState` and `EmptyState`.
+- Preview scenario per tab: `history`, `branches`, `tags`, `stashes` (plus `empty_history`, `empty_branches`, `empty_tags`, `empty_stashes`).
+- Performance on big repos: lightweight windowed `VirtualList` component for file changes and commit history, keeping rendering instantaneous. Diffs capped at 5,000 lines.
+- Customizable global keyboard shortcut: stored in `settings.json` via `plugin-store`, registered and validated via Rust commands `get_shortcut` and `set_shortcut`, default remains `Ctrl+Shift+G`. Editable inline from the Header's ⋯ menu with reset capability.
+- **Done when:** `npm test` (25 tests), `npm run typecheck`, and `cargo test` (106 tests) pass cleanly, and `npm run build` succeeds.

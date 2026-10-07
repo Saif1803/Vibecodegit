@@ -4,7 +4,7 @@ import type {
   Branch,
   ChangeSide,
   ClaudePrompt,
-  ClaudeRepos,
+  AgentRepos,
   CommitDetail,
   CommitOptions,
   CommitResult,
@@ -35,7 +35,7 @@ import type {
 // Failing commands reject with git's message as a string.
 
 export const resolveRepo = (folder: string) => invoke<Resolved>("resolve_repo", { folder });
-export const claudeRepos = () => invoke<ClaudeRepos>("claude_repos");
+export const agentRepos = () => invoke<AgentRepos>("agent_repos");
 export const getStatus = (repo: string) => invoke<RepoStatus>("git_status", { repo });
 
 export const stage = (repo: string, files: FileChange[]) => invoke<void>("stage", { repo, files });
@@ -131,3 +131,7 @@ export const listWorktrees = (repo: string) => invoke<Worktree[]>("list_worktree
 export const addWorktree = (repo: string, path: string, branch: string, newBranch: boolean) =>
   invoke<RepoRef>("add_worktree", { repo, path, branch, newBranch });
 export const removeWorktree = (repo: string, path: string, force: boolean) => invoke<void>("remove_worktree", { repo, path, force });
+
+// ---- Settings ----
+export const getShortcut = () => invoke<string>("get_shortcut");
+export const setShortcut = (shortcut: string) => invoke<void>("set_shortcut", { shortcut });
