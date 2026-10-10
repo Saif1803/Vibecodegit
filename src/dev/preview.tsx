@@ -172,7 +172,7 @@ function branchCmd(cmd: string, p: Record<string, unknown>) {
     case "list_branches":
       return branches.map((b) => ({ ...b, current: b.name === current }));
     case "list_remotes":
-      return [{ name: "origin", fetchUrl: "https://github.com/saif/claudegit.git", pushUrl: "https://github.com/saif/claudegit.git" }];
+      return [{ name: "origin", fetchUrl: "https://github.com/example/vibecodegit.git", pushUrl: "https://github.com/example/vibecodegit.git" }];
     case "create_branch":
       branches = [{ ...branches[0], name: p.name as string, upstream: null, dateMs: Date.now() }, ...branches];
       if (p.switchTo) current = p.name as string;

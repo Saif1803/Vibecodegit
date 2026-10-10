@@ -20,6 +20,10 @@ Built with Tauri 2, React, TypeScript, and Tailwind. It uses your system `git`, 
 - **If there's no upstream,** the branch is published to `origin`. If there's no remote, the commit stays local.
 - **Theme:** follows Windows light/dark. The header button cycles System, Light, and Dark.
 
+## Privacy
+
+Agent detection reads recent session files on your computer (modified in the last 24 hours) to find their working folders. For the selected repository, Claude Code session files are also read to suggest up to eight commit messages from what you asked Claude since your last commit. The app does not upload session files or prompts. If you use a suggestion in a commit and push, Git sends that commit message to your configured remote along with the commit.
+
 ## Develop
 
 ```bash
@@ -36,4 +40,6 @@ npm run tauri dev
 - **Installers:** `npm run tauri build` puts MSI and NSIS installers in `src-tauri/target/release/bundle/`.
   - If the build fails with `timeout: global` while downloading NSIS (slow connection), run `powershell -ExecutionPolicy Bypass -File scripts/fetch-nsis.ps1` once, then `npm run tauri build -- --bundles nsis`.
 
-See [CLAUDE.md](CLAUDE.md) for the full spec, design tokens, and the reasoning behind the git flow.
+See [CLAUDE.md](CLAUDE.md) for the architecture, design details, and Git workflow.
+
+Third-party notices for bundled assets are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
