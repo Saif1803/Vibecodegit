@@ -29,8 +29,8 @@ const SIDE_LABEL: Record<ChangeSide, string> = {
 
 const LINE_STYLE: Record<DiffLine["kind"], string> = {
   context: "text-fg-2",
-  add: "bg-st-added/10 text-fg",
-  del: "bg-st-deleted/10 text-fg",
+  add: "bg-st-added/20 text-fg",
+  del: "bg-st-deleted/20 text-fg",
   note: "text-fg-3 italic",
 };
 const SIGN: Record<DiffLine["kind"], string> = { context: " ", add: "+", del: "-", note: "" };

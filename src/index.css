@@ -53,12 +53,12 @@
   --accent-text: #e08a6d;
   --on-accent: #ffffff;
   --scroll: #5d5c5a;
-  --st-added: #8fbf7f;
+  --st-added: #78d6c4;
   --st-modified: #d9a657;
-  --st-deleted: #e0776b;
+  --st-deleted: #ff8a85;
   --st-renamed: #7fa7d9;
   --st-untracked: #95958d;
-  --st-conflict: #e0776b;
+  --st-conflict: #ff8a85;
   --graph-violet: #b39ddb;
   --shadow: 0 8px 24px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
 }
